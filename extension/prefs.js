@@ -220,6 +220,7 @@ export default class LiveWallpaperPrefs {
                 ["music-speed", 1.6],
                 ["shimmer", false],
                 ["bass-gravity", true],
+                ["beat-surge", false],
             ],
         };
         const SCENE_KEYS = Object.keys(SCENES);
