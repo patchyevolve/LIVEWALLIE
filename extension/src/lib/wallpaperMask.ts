@@ -121,7 +121,15 @@ export function computeCoverMask(
         const cy = Math.max(0, oy);
         const cw = Math.min(w, dw - cx);
         const chh = Math.min(h, dh - cy);
-        crop = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, w, h);
+        // copy_area asserts src/dest alpha match — the wallpaper may be a
+        // PNG with alpha, so the crop must carry the same channel layout.
+        crop = GdkPixbuf.Pixbuf.new(
+            GdkPixbuf.Colorspace.RGB,
+            scaled.get_has_alpha(),
+            8,
+            w,
+            h
+        );
         crop.fill(0);
         scaled.copy_area(cx, cy, cw, chh, crop, Math.max(0, -ox), Math.max(0, -oy));
     }

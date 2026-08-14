@@ -81,6 +81,30 @@ async function main() {
             !rows[2] && !rows[3], `rows=${rows.join(",")}`);
     }
 
+    // Alpha-channel wallpaper (PNG): copy_area asserts src/dest alpha match —
+    // the crop must carry the same channel layout or it fails silently and
+    // the mask becomes all-black (coverage 1.0 -> null). RGBA 4×8 onto a
+    // 4×4 layer: scale = 1, window = src rows 2..5 -> dark, dark, bright,
+    // bright (rows 0-1 and 4-5 bright).
+    const alphaBuf = new Uint8Array(4 * 8 * 4);
+    for (let y = 0; y < 8; y++) {
+        const v = y < 2 || (y >= 4 && y < 6) ? 0xee : 0x11;
+        for (let x = 0; x < 4; x++) {
+            const i = (y * 4 + x) * 4;
+            alphaBuf[i] = v; alphaBuf[i + 1] = v; alphaBuf[i + 2] = v;
+            alphaBuf[i + 3] = 255;
+        }
+    }
+    const alphaSrc = GdkPixbuf.Pixbuf.new_from_bytes(
+        GLib.Bytes.new(alphaBuf), GdkPixbuf.Colorspace.RGB, true, 8, 4, 8, 4 * 4
+    );
+    const cmA = computeCoverMask(alphaSrc, 4, 4, 0.5);
+    check("alpha wallpaper mask computed", cmA !== null, `c=${cmA ? cmA.coverage : "null"}`);
+    if (cmA) {
+        check("alpha wallpaper mask in range", cmA.coverage > 0.4 && cmA.coverage < 0.9,
+            `c=${cmA.coverage.toFixed(3)}`);
+    }
+
     // Sky (bright) top half, dark silhouette bottom half -> valid split.
     const split = buildCutoutMask(64, 64, (x, y) => (y < 32 ? 0.8 : 0.2), 0.5);
     check("mask: sky/silhouette split valid", split !== null,
