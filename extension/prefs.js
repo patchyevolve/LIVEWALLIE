@@ -365,6 +365,31 @@ export default class LiveWallpaperPrefs {
             });
         }
 
+        // ---- Wallpaper layering (§6) ------------------------------------
+        const layering = new Adw.PreferencesGroup({
+            title: "Wallpaper layering",
+            description:
+                "Optional depth effect: particles pass behind the dark foreground of your wallpaper (mountains, skylines). Off by default; falls back automatically if the image has no clean split.",
+        });
+        const layeringRow = new Adw.ActionRow({
+            title: "Enable layering",
+        });
+        const layeringSwitch = new Gtk.Switch({
+            valign: Gtk.Align.CENTER,
+            active: settings.get_boolean("wallpaper-layering"),
+        });
+        layeringRow.add_suffix(layeringSwitch);
+        layeringRow.set_activatable_widget(layeringSwitch);
+        layering.add(layeringRow);
+        settings.bind(
+            "wallpaper-layering",
+            layeringSwitch,
+            "active",
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        addScale(layering, settings, "Silhouette cutoff", "layering-threshold", 0.1, 0.9, 0.05);
+        page.add(layering);
+
         // ---- Screens ---------------------------------------------------
         const screens = new Adw.PreferencesGroup({
             title: "Screens",

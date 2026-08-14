@@ -32,6 +32,29 @@ async function main() {
 
     const { extractAccent } = await importMod("lib/paletteManager.js");
 
+    // §6 cutout mask: pure function, testable standalone.
+    const { buildCutoutMask } = await importMod("lib/wallpaperMask.js");
+
+    // Sky (bright) top half, dark silhouette bottom half -> valid split.
+    const split = buildCutoutMask(64, 64, (x, y) => (y < 32 ? 0.8 : 0.2), 0.5);
+    check("mask: sky/silhouette split valid", split !== null,
+        split ? `coverage=${split.coverage.toFixed(2)}` : "");
+    check("mask: bottom half masked foreground (coverage ~0.5)",
+        split !== null && Math.abs(split.coverage - 0.5) < 0.1,
+        split ? `coverage=${split.coverage.toFixed(2)}` : "");
+    check("mask: dark pixels alpha=1, bright alpha=0",
+        split !== null &&
+            split.alpha[10 * 64 + 10] === 0 && // bright top-left
+            split.alpha[40 * 64 + 10] === 1, // dark bottom-left
+        split ? `top=${split.alpha[10 * 64 + 10]} bottom=${split.alpha[40 * 64 + 10]}` : "");
+
+    check("mask: all-bright image -> null (no split)",
+        buildCutoutMask(64, 64, () => 0.9, 0.5) === null);
+    check("mask: all-dark image -> null (no split)",
+        buildCutoutMask(64, 64, () => 0.1, 0.5) === null);
+    check("mask: threshold respected (dark cutoff moves)",
+        buildCutoutMask(64, 64, (x, y) => (y < 32 ? 0.4 : 0.15), 0.3) !== null);
+
     // Solid red -> hue must be ~0 (deterministic).
     const red = extractAccent("file:///tmp/opencode/test_red.png");
     check("solid red wallpaper -> accent extracted", red !== null,

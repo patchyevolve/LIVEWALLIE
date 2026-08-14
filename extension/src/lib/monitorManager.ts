@@ -3,12 +3,15 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import { ParticleLayer } from "./particleLayer.js";
+import { WallpaperLayer } from "./wallpaperLayer.js";
 import type { SceneClient } from "./sceneClient.js";
 import type { PaletteAccent } from "./paletteManager.js";
 
 interface MonitorEntry {
     monitor: any; // Meta.Monitor
     layer: ParticleLayer;
+    /** §6 optional front cutout, only when enabled and non-fatal. */
+    layering: WallpaperLayer | null;
 }
 
 function monitorConnector(monitor: any): string {
@@ -58,7 +61,12 @@ export class MonitorManager {
         this._settingsChangedId = this._settings?.connect(
             "changed",
             (_s: Gio.Settings, key: string) => {
-                if (key === "disabled-screens" || key === "master-enabled") {
+                if (
+                    key === "disabled-screens" ||
+                    key === "master-enabled" ||
+                    key === "wallpaper-layering" ||
+                    key === "layering-threshold"
+                ) {
                     this._rebuild();
                 }
             }
@@ -115,6 +123,7 @@ export class MonitorManager {
         const disabled = this._disabledConnectors();
         const s = this._settings;
         const masterOn = s ? s.get_boolean("master-enabled") : true;
+        const layeringOn = s ? s.get_boolean("wallpaper-layering") : false;
 
         for (const monitor of monitors) {
             const connector = monitorConnector(monitor);
@@ -148,7 +157,23 @@ export class MonitorManager {
             group.add_child(actor);
 
             layer.start();
-            this._entries.push({ monitor, layer });
+
+            // §6 optional layering: front cutout painted ABOVE the particles
+            // (added later = on top). Any failure inside leaves it empty and
+            // the particle layer untouched — it can never break the wallpaper.
+            let layering: WallpaperLayer | null = null;
+            if (layeringOn) {
+                layering = new WallpaperLayer(w, h, this._settings);
+                const front = layering.getActor();
+                front.set_position(
+                    monitor.x + Math.round((monitor.width - w) / 2),
+                    monitor.y + Math.round((monitor.height - h) / 2)
+                );
+                group.add_child(front);
+                layering.enable();
+            }
+
+            this._entries.push({ monitor, layer, layering });
         }
     }
 
@@ -173,6 +198,7 @@ export class MonitorManager {
 
     private _destroyEntries() {
         for (const entry of this._entries) {
+            entry.layering?.destroy();
             entry.layer.destroy();
         }
         this._entries = [];
