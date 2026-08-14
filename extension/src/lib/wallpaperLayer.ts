@@ -1,179 +1,135 @@
-import Cogl from "gi://Cogl";
-import Clutter from "gi://Clutter";
 import GdkPixbuf from "gi://GdkPixbuf";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
-import St from "gi://St";
-import { applyMaskToPixbuf, buildCutoutMask, type CutoutResult } from "./wallpaperMask.js";
+import { computeCoverMask } from "./wallpaperMask.js";
 
 /**
- * §6 wallpaper layering — optional depth effect, strictly additive.
+ * §6 wallpaper layering — the particle-suppression technique.
  *
- * Renders the wallpaper's foreground (dark regions: silhouettes, mountains,
- * skylines) as a masked image painted ABOVE the particle layer, so particles
- * appear to pass BEHIND the foreground while showing through the bright
- * background (sky).
+ * v1.1: the original approach repainted the wallpaper as a masked front
+ * actor. That could never match GNOME's own background rendering (cover
+ * crop, zoom mode, per-monitor geometry), so on some monitors the cutout
+ * was visibly misaligned — "wallpaper looks double". Instead of painting
+ * anything, we now compute a foreground mask in the layer's own coordinate
+ * space (cover-fit sampling, exactly like the desktop paints it) and the
+ * particle layer simply fades particles over foreground pixels. The
+ * wallpaper itself is never touched, so double-imaging is impossible by
+ * construction.
  *
- * Contract: this module must never degrade the v1 wallpaper. It is opt-in
- * (schema key "wallpaper-layering", default false) and every failure path
- * simply removes the front actor — the particle layer is never touched.
- * The mask is computed once per wallpaper change (design doc: "runs once
- * per wallpaper change, so it can afford to be a little expensive"), at
- * display resolution, with a sanity check: if the mask covers almost none
- * or almost all of the image, layering is not meaningful — fall back to
- * flat (no front actor) instead of forcing a broken cutout.
+ * Contract: opt-in (schema key "wallpaper-layering", default false).
+ * Mask computation runs once per wallpaper/geometry/threshold change and
+ * is cached; failures return null (particles stay flat). This module uses
+ * only GI bindings — no shell resources — so it loads in the standalone
+ * acceptance harness.
  */
 
-function clamp(v: number, lo: number, hi: number) {
-    return Math.min(hi, Math.max(lo, v));
-}
+export type ForegroundMask = number[] | null;
 
-export class WallpaperLayer {
-    private _actor: St.Widget;
-    private _content: St.ImageContent | null = null;
-    private _backgroundSettings!: Gio.Settings;
+export class WallpaperForeground {
     private _settings: Gio.Settings | null;
-    private _backgroundId: number | null = null;
-    private _settingsId: number | null = null;
+    private _backgroundSettings: Gio.Settings;
     private _width: number;
     private _height: number;
-    private _threshold: number;
-    private _enabled = true;
+    private _srcCache: { uri: string; pb: GdkPixbuf.Pixbuf | null } | null =
+        null;
+    private _maskCache: {
+        uri: string;
+        w: number;
+        h: number;
+        threshold: number;
+        alpha: ForegroundMask;
+    } | null = null;
+    private _ids: number[] = [];
+    private _onChange: (mask: ForegroundMask) => void = () => {};
     private _destroyed = false;
 
     constructor(width: number, height: number, settings: Gio.Settings | null) {
         this._width = width;
         this._height = height;
         this._settings = settings;
-        this._threshold = settings ? settings.get_double("layering-threshold") : 0.5;
-        this._actor = new St.Widget({ reactive: false });
-        this._actor.set_size(width, height);
+        this._backgroundSettings = new Gio.Settings({
+            schema_id: "org.gnome.desktop.background",
+        });
     }
 
-    getActor() {
-        return this._actor;
+    /** Called whenever the effective mask changes (wallpaper or cutoff). */
+    onChange(cb: (mask: ForegroundMask) => void) {
+        this._onChange = cb;
     }
 
     enable() {
         if (this._destroyed) return;
-        this._backgroundSettings = new Gio.Settings({
-            schema_id: "org.gnome.desktop.background",
-        });
-        this._backgroundId = this._backgroundSettings.connect(
-            "changed::picture-uri",
-            () => this._rebuild()
+        this._ids.push(
+            this._backgroundSettings.connect("changed::picture-uri", () =>
+                this._refresh()
+            )
         );
         if (this._settings) {
-            this._settingsId = this._settings.connect(
-                "changed::layering-threshold",
-                () => {
-                    this._threshold = this._settings?.get_double("layering-threshold") ?? 0.5;
-                    this._rebuild();
-                }
+            this._ids.push(
+                this._settings.connect("changed::layering-threshold", () =>
+                    this._refresh()
+                )
             );
         }
-        this._rebuild();
     }
 
-    resize(width: number, height: number) {
-        this._width = width;
-        this._height = height;
-        this._actor.set_size(width, height);
-        this._rebuild();
+    private _refresh() {
+        this._srcCache = null;
+        this._maskCache = null;
+        this._onChange(this.getMask());
     }
 
-    /** Opt-out on command (settings toggle off): removes the front actor. */
-    setActive(active: boolean) {
-        this._enabled = active;
-        if (!active) this._clearContent();
-    }
-
-    /** Failure-safe: any exception in mask generation leaves the front
-     *  actor empty — visually identical to v1 (no layering). */
-    private _rebuild() {
-        if (this._destroyed || !this._enabled) return;
-        try {
-            const uri = this._backgroundSettings.get_string("picture-uri");
-            const pixbuf = this._loadScaled(uri);
-            if (!pixbuf) {
-                this._clearContent();
-                return;
-            }
-            const mask = this._computeMask(pixbuf);
-            if (!mask) {
-                // Degenerate split (flat image, no clean silhouette): fall
-                // back to flat overlay — never force a broken cutout.
-                this._clearContent();
-                return;
-            }
-            const masked = applyMaskToPixbuf(pixbuf, mask.alpha);
-            const w = masked.get_width();
-            const h = masked.get_height();
-            const stride = masked.get_rowstride();
-            if (!this._content) {
-                this._content = new St.ImageContent();
-                this._actor.set_content(this._content);
-            }
-            this._content.set_bytes(
-                Clutter.get_default_backend().get_cogl_context(),
-                masked.get_pixels(),
-                Cogl.PixelFormat.RGBA_8888,
-                w,
-                h,
-                stride
-            );
-        } catch (e) {
-            console.error(`[live-wallpaper] layering failed, flat fallback: ${e}`);
-            this._clearContent();
+    /** Foreground alpha in layer coordinates (row-major, w*h entries), or
+     *  null when layering is off / the image has no clean split. Cached. */
+    getMask(): ForegroundMask {
+        const s = this._settings;
+        if (this._destroyed || !s || !s.get_boolean("wallpaper-layering")) {
+            return null;
         }
+        const uri = this._backgroundSettings.get_string("picture-uri");
+        const threshold = s.get_double("layering-threshold");
+        if (
+            this._maskCache &&
+            this._maskCache.uri === uri &&
+            this._maskCache.w === this._width &&
+            this._maskCache.h === this._height &&
+            this._maskCache.threshold === threshold
+        ) {
+            return this._maskCache.alpha;
+        }
+        if (!this._srcCache || this._srcCache.uri !== uri) {
+            this._srcCache = { uri, pb: WallpaperForeground._loadPixbuf(uri) };
+        }
+        const pb = this._srcCache.pb;
+        const alpha: ForegroundMask =
+            pb === null
+                ? null
+                : computeCoverMask(pb, this._width, this._height, threshold)
+                      ?.alpha ?? null;
+        this._maskCache = { uri, w: this._width, h: this._height, threshold, alpha };
+        return alpha;
     }
 
-    private _loadScaled(uri: string | null): GdkPixbuf.Pixbuf | null {
-        if (!uri) return null;
-        let path = uri;
-        if (path.startsWith("file://")) path = decodeURIComponent(path.slice(7));
+    private static _loadPixbuf(uri: string): GdkPixbuf.Pixbuf | null {
+        let path = uri || "";
+        if (path.startsWith("file://")) {
+            path = decodeURIComponent(path.slice(7));
+        }
         if (!GLib.file_test(path, GLib.FileTest.EXISTS)) return null;
         try {
-            return GdkPixbuf.Pixbuf.new_from_file_at_scale(
-                path,
-                this._width,
-                this._height,
-                true
-            );
+            return GdkPixbuf.Pixbuf.new_from_file(path);
         } catch (e) {
             return null;
         }
     }
 
-    private _computeMask(pb: GdkPixbuf.Pixbuf): CutoutResult | null {
-        const n = pb.get_n_channels();
-        const stride = pb.get_rowstride();
-        const px = pb.get_pixels();
-        const w = pb.get_width();
-        const h = pb.get_height();
-        return buildCutoutMask(w, h, (x, y) => {
-            const i = y * stride + x * n;
-            return (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / 255;
-        }, this._threshold);
-    }
-
-    private _clearContent() {
-        this._content = null;
-        this._actor.set_content(null);
-    }
-
     destroy() {
         this._destroyed = true;
-        if (this._backgroundId !== null && this._backgroundSettings) {
-            this._backgroundSettings.disconnect(this._backgroundId);
-            this._backgroundId = null;
+        for (const id of this._ids) {
+            this._backgroundSettings.disconnect(id);
         }
-        if (this._settingsId !== null) {
-            this._settings?.disconnect(this._settingsId);
-            this._settingsId = null;
-        }
-        try {
-            this._actor.destroy();
-        } catch (e) {}
+        this._ids = [];
+        this._srcCache = null;
+        this._maskCache = null;
     }
 }

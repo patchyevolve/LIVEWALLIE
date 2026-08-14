@@ -3,15 +3,15 @@ import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import * as Main from "resource:///org/gnome/shell/ui/main.js";
 import { ParticleLayer } from "./particleLayer.js";
-import { WallpaperLayer } from "./wallpaperLayer.js";
+import { WallpaperForeground } from "./wallpaperLayer.js";
 import type { SceneClient } from "./sceneClient.js";
 import type { PaletteAccent } from "./paletteManager.js";
 
 interface MonitorEntry {
     monitor: any; // Meta.Monitor
     layer: ParticleLayer;
-    /** §6 optional front cutout, only when enabled and non-fatal. */
-    layering: WallpaperLayer | null;
+    /** §6 optional foreground mask provider (never paints anything). */
+    foreground: WallpaperForeground | null;
 }
 
 function monitorConnector(monitor: any): string {
@@ -158,22 +158,21 @@ export class MonitorManager {
 
             layer.start();
 
-            // §6 optional layering: front cutout painted ABOVE the particles
-            // (added later = on top). Any failure inside leaves it empty and
-            // the particle layer untouched — it can never break the wallpaper.
-            let layering: WallpaperLayer | null = null;
+            // §6 optional layering: particle-suppression technique — the
+            // foreground mask fades particles over the wallpaper's dark
+            // regions. Nothing is repainted, so no double-image is possible.
+            // Any failure yields a null mask and the layer stays flat.
+            let foreground: WallpaperForeground | null = null;
             if (layeringOn) {
-                layering = new WallpaperLayer(w, h, this._settings);
-                const front = layering.getActor();
-                front.set_position(
-                    monitor.x + Math.round((monitor.width - w) / 2),
-                    monitor.y + Math.round((monitor.height - h) / 2)
+                foreground = new WallpaperForeground(w, h, this._settings);
+                foreground.onChange((mask) =>
+                    layer.setForegroundMask(mask, w, h)
                 );
-                group.add_child(front);
-                layering.enable();
+                foreground.enable();
+                layer.setForegroundMask(foreground.getMask(), w, h);
             }
 
-            this._entries.push({ monitor, layer, layering });
+            this._entries.push({ monitor, layer, foreground });
         }
     }
 
@@ -198,7 +197,7 @@ export class MonitorManager {
 
     private _destroyEntries() {
         for (const entry of this._entries) {
-            entry.layering?.destroy();
+            entry.foreground?.destroy();
             entry.layer.destroy();
         }
         this._entries = [];

@@ -101,6 +101,11 @@ export class ParticleLayer {
     private _running = false;
     private _destroyed = false;
 
+    // §6 layering: optional foreground alpha in layer coordinates. Particles
+    // over foreground pixels fade out — the wallpaper is never repainted.
+    private _foreground: { alpha: number[]; w: number; h: number } | null =
+        null;
+
     constructor(
         client: SceneClient,
         width: number,
@@ -124,6 +129,13 @@ export class ParticleLayer {
 
     getActor(): St.DrawingArea {
         return this._area;
+    }
+
+    /** §6 layering: foreground alpha grid in layer coordinates (row-major,
+     *  w*h entries). null disables. Called on mask changes, not per frame —
+     *  the draw loop only reads it. */
+    setForegroundMask(alpha: number[] | null, w: number, h: number) {
+        this._foreground = alpha ? { alpha, w, h } : null;
     }
 
     /** Rebuild the actor/content for a new monitor geometry. */
@@ -431,7 +443,18 @@ export class ParticleLayer {
             const twinkle = 0.85 + 0.15 * Math.sin(this._tMs * (0.001 + p.depth * 0.002) + p.seed * 6.283);
             const breath = 1 + 0.15 * this._breath;
             const alpha = (p.flashT > 0 ? 0.95 : 0.35 + p.depth * 0.55) * this._fieldAlpha * twinkle * breath;
-            cr.setSourceRGBA(r, g, b, Math.min(1, alpha));
+            let a = Math.min(1, alpha);
+            // §6 layering: fade particles out over foreground pixels.
+            const fg = this._foreground;
+            if (fg) {
+                const sx = Math.floor(p.x);
+                const sy = Math.floor(p.y);
+                if (sx >= 0 && sy >= 0 && sx < fg.w && sy < fg.h) {
+                    a *= 1 - fg.alpha[sy * fg.w + sx];
+                }
+            }
+            if (a <= 0.003) continue;
+            cr.setSourceRGBA(r, g, b, a);
             cr.arc(p.x, p.y, p.size, 0, 2 * Math.PI);
             cr.fill();
         }

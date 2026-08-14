@@ -90,3 +90,47 @@ export function applyMaskToPixbuf(
         w * 4
     );
 }
+
+/** Foreground mask for a display of w×h logical pixels, sampled from the
+ *  source wallpaper exactly as GNOME paints it: cover-fit (scale to the
+ *  larger axis, center-crop). The returned alpha array is indexed directly
+ *  by layer coordinates — no per-frame coordinate math in the draw path. */
+export function computeCoverMask(
+    src: GdkPixbuf.Pixbuf,
+    w: number,
+    h: number,
+    threshold: number
+): CutoutResult | null {
+    const iw = src.get_width();
+    const ih = src.get_height();
+    const scale = Math.max(w / iw, h / ih);
+    const dw = Math.max(1, Math.round(iw * scale));
+    const dh = Math.max(1, Math.round(ih * scale));
+    // Window of w×h centered on the dw×dh scaled image.
+    const ox = Math.round((dw - w) / 2);
+    const oy = Math.round((dh - h) / 2);
+
+    let crop: GdkPixbuf.Pixbuf;
+    if (dw === iw && dh === ih && ox === 0 && oy === 0) {
+        crop = src;
+    } else {
+        const scaled = (dw === iw && dh === ih
+            ? src
+            : src.scale_simple(dw, dh, GdkPixbuf.InterpType.NEAREST))!;
+        const cx = Math.max(0, ox);
+        const cy = Math.max(0, oy);
+        const cw = Math.min(w, dw - cx);
+        const chh = Math.min(h, dh - cy);
+        crop = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, w, h);
+        crop.fill(0);
+        scaled.copy_area(cx, cy, cw, chh, crop, Math.max(0, -ox), Math.max(0, -oy));
+    }
+
+    const stride = crop.get_rowstride();
+    const n = crop.get_n_channels();
+    const px = crop.get_pixels();
+    return buildCutoutMask(w, h, (x, y) => {
+        const i = y * stride + x * n;
+        return (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / 255;
+    }, threshold);
+}

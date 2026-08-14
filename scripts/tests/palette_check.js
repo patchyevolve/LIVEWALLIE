@@ -33,7 +33,7 @@ async function main() {
     const { extractAccent } = await importMod("lib/paletteManager.js");
 
     // §6 cutout mask: pure function, testable standalone.
-    const { buildCutoutMask, applyMaskToPixbuf } = await importMod("lib/wallpaperMask.js");
+    const { buildCutoutMask, applyMaskToPixbuf, computeCoverMask } = await importMod("lib/wallpaperMask.js");
     const GdkPixbuf = imports.gi.GdkPixbuf;
 
     // Regression: get_pixels() returns a COPY in modern GJS — mask writes
@@ -51,6 +51,35 @@ async function main() {
     check("masked pixbuf alpha lands (255 in bottom half)",
         mPx[(7 * masked.get_rowstride()) + 3] === 255,
         `a=${mPx[(7 * masked.get_rowstride()) + 3]}`);
+
+    // Cover-fit sampling: portrait source (8 wide × 16 tall) onto a
+    // 4×4 layer. scale = max(4/8, 4/16) = 0.5 -> 4×8 scaled; the center
+    // window is scaled rows 2..5 = src rows 4..11. Source: bright rows
+    // 0-3 and 8-15, dark rows 4-7 -> window = dark, dark, bright, bright.
+    // Built via new_from_bytes: get_pixels() returns a copy, so direct
+    // writes would silently vanish.
+    const GLib = imports.gi.GLib;
+    const coverBuf = new Uint8Array(8 * 16 * 3);
+    for (let y = 0; y < 16; y++) {
+        const v = y < 4 || y >= 8 ? 0xee : 0x11;
+        for (let x = 0; x < 8; x++) {
+            const i = (y * 8 + x) * 3;
+            coverBuf[i] = v; coverBuf[i + 1] = v; coverBuf[i + 2] = v;
+        }
+    }
+    const coverSrc = GdkPixbuf.Pixbuf.new_from_bytes(
+        GLib.Bytes.new(coverBuf), GdkPixbuf.Colorspace.RGB, false, 8, 8, 16, 8 * 3
+    );
+    const cm = computeCoverMask(coverSrc, 4, 4, 0.5);
+    check("cover mask computed on portrait crop", cm !== null, `c=${cm ? cm.coverage : "null"}`);
+    if (cm) {
+        check("cover mask length = w*h", cm.alpha.length === 16, `len=${cm.alpha.length}`);
+        const rows = [0, 1, 2, 3].map((y) => cm.alpha[y * 4] > 0.5);
+        check("cover mask rows 0-1 dark window (foreground)",
+            rows[0] && rows[1], `rows=${rows.join(",")}`);
+        check("cover mask rows 2-3 bright window (flat)",
+            !rows[2] && !rows[3], `rows=${rows.join(",")}`);
+    }
 
     // Sky (bright) top half, dark silhouette bottom half -> valid split.
     const split = buildCutoutMask(64, 64, (x, y) => (y < 32 ? 0.8 : 0.2), 0.5);

@@ -371,7 +371,7 @@ export default class LiveWallpaperPrefs {
         const layering = new Adw.PreferencesGroup({
             title: "Wallpaper layering",
             description:
-                "Optional depth effect: particles pass behind the dark foreground of your wallpaper (mountains, skylines). Off by default; fades out automatically when the image has no clean split.",
+                "Optional depth effect: particles fade out behind the dark foreground of your wallpaper (mountains, skylines). The wallpaper itself is never repainted — nothing covers it, so there is no double-image. Off by default; auto-disabled when the image has no clean split.",
         });
         const layeringRow = new Adw.ActionRow({
             title: "Enable layering",
