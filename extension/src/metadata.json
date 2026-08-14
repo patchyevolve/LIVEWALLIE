@@ -1,0 +1,10 @@
+{
+  "uuid": "live-wallpaper@codeworks2",
+  "name": "Live Wallpaper",
+  "description": "System- and music-reactive live wallpaper for GNOME Shell",
+  "main": "extension.js",
+  "settings-schema": "org.gnome.shell.extensions.live-wallpaper@codeworks2",
+  "shell-version": ["50"],
+  "version": 2,
+  "url": "https://github.com/codeworks2/live-wallpaper"
+}

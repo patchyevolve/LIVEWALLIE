@@ -1,0 +1,5 @@
+sampler/target/
+extension/node_modules/
+extension/dist/
+extension/prefs.js
+scripts/install.sh

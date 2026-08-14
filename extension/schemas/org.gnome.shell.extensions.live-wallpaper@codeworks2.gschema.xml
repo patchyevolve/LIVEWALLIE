@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.live-wallpaper@codeworks2" path="/org/gnome/shell/extensions/live-wallpaper@codeworks2/">
+    <key name="master-enabled" type="b">
+      <default>true</default>
+      <summary>Enable the live wallpaper</summary>
+    </key>
+    <key name="pause-fullscreen" type="b">
+      <default>true</default>
+      <summary>Pause the animation when a window is fullscreen on a screen</summary>
+    </key>
+    <key name="idle-speed" type="d">
+      <default>1.0</default>
+      <range min="0" max="5"/>
+      <summary>System mode drift speed multiplier</summary>
+    </key>
+    <key name="shimmer" type="b">
+      <default>true</default>
+      <summary>Subtle vertical shimmer in System mode</summary>
+    </key>
+    <key name="music-speed" type="d">
+      <default>1.0</default>
+      <range min="0" max="5"/>
+      <summary>Music mode speed multiplier</summary>
+    </key>
+    <key name="bass-gravity" type="b">
+      <default>true</default>
+      <summary>Bass pulls particles downward</summary>
+    </key>
+    <key name="bass-strength" type="d">
+      <default>1.0</default>
+      <range min="0" max="3"/>
+      <summary>Bass gravity strength</summary>
+    </key>
+    <key name="beat-surge" type="b">
+      <default>true</default>
+      <summary>Beats surge the field along the drift axis</summary>
+    </key>
+    <key name="beat-strength" type="d">
+      <default>1.0</default>
+      <range min="0" max="3"/>
+      <summary>Beat surge strength</summary>
+    </key>
+    <key name="beat-flash" type="b">
+      <default>true</default>
+      <summary>Beats flash particles white</summary>
+    </key>
+    <key name="stream-drift" type="b">
+      <default>true</default>
+      <summary>Network/pan activity pushes the field sideways</summary>
+    </key>
+    <key name="stream-strength" type="d">
+      <default>1.0</default>
+      <range min="0" max="3"/>
+      <summary>Stream drift strength</summary>
+    </key>
+    <key name="disabled-screens" type="as">
+      <default>[]</default>
+      <summary>Connector names of screens the wallpaper is hidden on</summary>
+    </key>
+    <key name="screen-orientations" type="as">
+      <default>[]</default>
+      <summary>Per-screen rotation overrides as connector=rotation ("0","90","180","270")</summary>
+    </key>
+    <key name="palette-mode" type="s">
+      <default>"arc"</default>
+      <summary>Color source: "arc" (built-in hue arc), "fixed" (user hue), "wallpaper" (accent extracted from the wallpaper image)</summary>
+    </key>
+    <key name="fixed-hue" type="d">
+      <default>300</default>
+      <range min="0" max="360"/>
+      <summary>Base hue used when palette-mode is "fixed"</summary>
+    </key>
+    <key name="accent-shift" type="d">
+      <default>0</default>
+      <range min="-180" max="180"/>
+      <summary>Hue offset applied on top of the wallpaper accent</summary>
+    </key>
+  </schema>
+</schemalist>
