@@ -196,6 +196,7 @@ export default class LiveWallpaperPrefs {
                 ["music-speed", 1],
                 ["shimmer", true],
                 ["bass-gravity", true],
+                ["beat-surge", true],
             ],
             aurora: [
                 ["palette-mode", "fixed"],
@@ -204,6 +205,7 @@ export default class LiveWallpaperPrefs {
                 ["music-speed", 1.35],
                 ["shimmer", true],
                 ["bass-gravity", true],
+                ["beat-surge", true],
             ],
             ember: [
                 ["palette-mode", "fixed"],
@@ -212,6 +214,7 @@ export default class LiveWallpaperPrefs {
                 ["music-speed", 1.25],
                 ["shimmer", true],
                 ["bass-gravity", true],
+                ["beat-surge", true],
             ],
             rain: [
                 ["palette-mode", "fixed"],
@@ -224,6 +227,18 @@ export default class LiveWallpaperPrefs {
             ],
         };
         const SCENE_KEYS = Object.keys(SCENES);
+        // Presets are full assignments over this key set — a scene must set
+        // every one of them, or switching scenes leaks stale values (e.g.
+        // Rain's beat-surge:false sticking when moving to Ember).
+        const PRESET_KEYS = [
+            "palette-mode",
+            "fixed-hue",
+            "idle-speed",
+            "music-speed",
+            "shimmer",
+            "bass-gravity",
+            "beat-surge",
+        ];
         const sceneRow = new Adw.ComboRow({
             title: "Scene",
             model: Gtk.StringList.new([
@@ -239,8 +254,15 @@ export default class LiveWallpaperPrefs {
         });
         sceneRow.connect("notify::selected", () => {
             const preset = SCENE_KEYS[sceneRow.selected];
+            const bundle = SCENES[preset];
+            const missing = PRESET_KEYS.filter(
+                (k) => !bundle.some(([key]) => key === k)
+            );
+            if (missing.length > 0) {
+                log(`live-wallpaper prefs: scene "${preset}" missing keys: ${missing}`);
+            }
             settings.set_string("scene-preset", preset);
-            for (const [key, value] of SCENES[preset]) {
+            for (const [key, value] of bundle) {
                 if (typeof value === "boolean") {
                     settings.set_boolean(key, value);
                 } else if (typeof value === "number") {
