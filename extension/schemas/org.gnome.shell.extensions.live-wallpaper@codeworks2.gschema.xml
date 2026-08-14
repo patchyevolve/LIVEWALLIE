@@ -76,6 +76,30 @@
       <range min="-180" max="180"/>
       <summary>Hue offset applied on top of the wallpaper accent</summary>
     </key>
+    <key name="scene-preset" type="s">
+      <default>"deepspace"</default>
+      <choices>
+        <choice value="deepspace"/>
+        <choice value="aurora"/>
+        <choice value="ember"/>
+        <choice value="rain"/>
+      </choices>
+      <summary>One-click scene looks. Selecting one writes the scene's values into the individual settings below — every knob stays tweakable afterwards.</summary>
+    </key>
+    <key name="pointer-effect" type="b">
+      <default>true</default>
+      <summary>Particles part and swirl around the mouse pointer</summary>
+    </key>
+    <key name="pointer-radius" type="d">
+      <default>180</default>
+      <range min="80" max="400"/>
+      <summary>Radius (px) around the pointer that affects particles</summary>
+    </key>
+    <key name="pointer-strength" type="d">
+      <default>1.0</default>
+      <range min="0.1" max="3"/>
+      <summary>Pointer push strength</summary>
+    </key>
     <key name="wallpaper-layering" type="b">
       <default>false</default>
       <summary>§6 optional depth layering: mask the wallpaper's foreground (dark regions) and fade the particles behind it so they appear to pass behind the silhouette. Default off; disabled entirely on any failure.</summary>

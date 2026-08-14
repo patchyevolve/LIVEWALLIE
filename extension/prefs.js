@@ -182,6 +182,76 @@ export default class LiveWallpaperPrefs {
         );
         page.add(general);
 
+        // ---- Scene presets ----------------------------------------------
+        const scenes = new Adw.PreferencesGroup({
+            title: "Scene",
+            description:
+                "One-click looks. Selecting a scene writes its values into the settings below — every knob stays tweakable afterwards.",
+        });
+        const SCENES = {
+            deepspace: [
+                ["palette-mode", "arc"],
+                ["fixed-hue", 300],
+                ["idle-speed", 1],
+                ["music-speed", 1],
+                ["shimmer", true],
+                ["bass-gravity", true],
+            ],
+            aurora: [
+                ["palette-mode", "fixed"],
+                ["fixed-hue", 140],
+                ["idle-speed", 0.65],
+                ["music-speed", 1.35],
+                ["shimmer", true],
+                ["bass-gravity", true],
+            ],
+            ember: [
+                ["palette-mode", "fixed"],
+                ["fixed-hue", 18],
+                ["idle-speed", 0.8],
+                ["music-speed", 1.25],
+                ["shimmer", true],
+                ["bass-gravity", true],
+            ],
+            rain: [
+                ["palette-mode", "fixed"],
+                ["fixed-hue", 212],
+                ["idle-speed", 1.5],
+                ["music-speed", 1.6],
+                ["shimmer", false],
+                ["bass-gravity", true],
+            ],
+        };
+        const SCENE_KEYS = Object.keys(SCENES);
+        const sceneRow = new Adw.ComboRow({
+            title: "Scene",
+            model: Gtk.StringList.new([
+                "Deep space",
+                "Aurora",
+                "Ember",
+                "Rain",
+            ]),
+            selected: Math.max(
+                0,
+                SCENE_KEYS.indexOf(settings.get_string("scene-preset"))
+            ),
+        });
+        sceneRow.connect("notify::selected", () => {
+            const preset = SCENE_KEYS[sceneRow.selected];
+            settings.set_string("scene-preset", preset);
+            for (const [key, value] of SCENES[preset]) {
+                if (typeof value === "boolean") {
+                    settings.set_boolean(key, value);
+                } else if (typeof value === "number") {
+                    settings.set_double(key, value);
+                } else {
+                    settings.set_string(key, value);
+                }
+            }
+        });
+        scenes.add(sceneRow);
+        page.add(scenes);
+
         // ---- System mode -----------------------------------------------
         const system = new Adw.PreferencesGroup({
             title: "System mode (idle)",
@@ -191,6 +261,23 @@ export default class LiveWallpaperPrefs {
         addScale(system, settings, "Drift speed", "idle-speed", 0, 5, 0.1);
         addSwitch(system, settings, "Shimmer", "Subtle vertical wave on the field", "shimmer");
         page.add(system);
+
+        // ---- Pointer interaction ----------------------------------------
+        const pointer = new Adw.PreferencesGroup({
+            title: "Pointer interaction",
+            description:
+                "Particles part and swirl around your mouse cursor, like water around a hand.",
+        });
+        addSwitch(
+            pointer,
+            settings,
+            "React to pointer",
+            "Particles push away from the cursor",
+            "pointer-effect"
+        );
+        addScale(pointer, settings, "Effect radius (px)", "pointer-radius", 80, 400, 10);
+        addScale(pointer, settings, "Push strength", "pointer-strength", 0.1, 3, 0.1);
+        page.add(pointer);
 
         // ---- Music mode ------------------------------------------------
         const music = new Adw.PreferencesGroup({

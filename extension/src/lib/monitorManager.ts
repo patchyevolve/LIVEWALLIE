@@ -142,18 +142,30 @@ export class MonitorManager {
                 if (h > w) [w, h] = [h, w];
             }
 
+            const actorX = monitor.x + Math.round((monitor.width - w) / 2);
+            const actorY = monitor.y + Math.round((monitor.height - h) / 2);
+
             const layer = new ParticleLayer(
                 this._client,
                 w,
                 h,
                 this._settings,
-                this._getAccent
+                this._getAccent,
+                () => {
+                    // Cursor position in layer coordinates.
+                    try {
+                        const [gx, gy] = global.get_pointer();
+                        return {
+                            x: gx - actorX,
+                            y: gy - actorY,
+                        };
+                    } catch (e) {
+                        return null;
+                    }
+                }
             );
             const actor = layer.getActor();
-            actor.set_position(
-                monitor.x + Math.round((monitor.width - w) / 2),
-                monitor.y + Math.round((monitor.height - h) / 2)
-            );
+            actor.set_position(actorX, actorY);
             group.add_child(actor);
 
             layer.start();

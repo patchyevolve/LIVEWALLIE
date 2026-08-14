@@ -106,18 +106,25 @@ export class ParticleLayer {
     private _foreground: { alpha: number[]; w: number; h: number } | null =
         null;
 
+    // Pointer interaction: cursor position in layer coordinates (null when
+    // the compositor can't report it). Read once per frame in _stepParticles.
+    private _getPointer: (() => { x: number; y: number } | null) | null =
+        null;
+
     constructor(
         client: SceneClient,
         width: number,
         height: number,
         settings: Gio.Settings | null,
-        getAccent: () => PaletteAccent | null
+        getAccent: () => PaletteAccent | null,
+        getPointer: (() => { x: number; y: number } | null) | null = null
     ) {
         this._client = client;
         this._width = width;
         this._height = height;
         this._settings = settings;
         this._getAccent = getAccent;
+        this._getPointer = getPointer;
         this._accent = getAccent();
 
         this._area = new St.DrawingArea({ reactive: false });
@@ -327,6 +334,23 @@ export class ParticleLayer {
         const drift = streamOn ? this._drift * 60 * streamMul : 0; // px/s, net horizontal push
         const churnP = this._spawnRate * 0.00035 * dt; // respawn probability
 
+        // Pointer interaction: one read per frame; impulse applied below.
+        let ptrX = 0;
+        let ptrY = 0;
+        let ptrR = 0;
+        let ptrStr = 0;
+        const ptrOn = s0 ? s0.get_boolean("pointer-effect") : true;
+        if (ptrOn && this._getPointer) {
+            const ptr = this._getPointer();
+            if (ptr) {
+                ptrX = ptr.x;
+                ptrY = ptr.y;
+                ptrR = s0 ? s0.get_double("pointer-radius") : 180;
+                ptrStr = s0 ? s0.get_double("pointer-strength") : 1;
+            }
+        }
+        const ptrR2 = ptrR * ptrR;
+
         for (const p of this._particles) {
             const baseSpeed = (6 + p.depth * 34) * speedMul * (1 + surge);
             p.vx = baseSpeed + drift;
@@ -338,6 +362,22 @@ export class ParticleLayer {
                 (shimmer
                     ? Math.sin(this._tMs * 0.0015 + p.seed * 6.283) * 30 * speedMul * (1 + surge)
                     : 0);
+            // Pointer interaction: radial push away from the cursor plus a
+            // small tangential swirl — particles "part" around it like water.
+            // Force falls off linearly to zero at the radius edge.
+            if (ptrR2 > 0) {
+                const dxp = p.x - ptrX;
+                const dyp = p.y - ptrY;
+                const d2 = dxp * dxp + dyp * dyp;
+                if (d2 < ptrR2 && d2 > 0.01) {
+                    const d = Math.sqrt(d2);
+                    const f = (1 - d / ptrR) * ptrStr;
+                    const push = f * 260;
+                    const swirl = f * 90;
+                    p.vx += (dxp / d) * push + (-dyp / d) * swirl;
+                    p.vy += (dyp / d) * push + (dxp / d) * swirl;
+                }
+            }
             p.x += p.vx * s;
             p.y += p.vy * s;
 
