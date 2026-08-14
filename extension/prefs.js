@@ -10,7 +10,9 @@ import GLib from "gi://GLib?version=2.0";
 import Gtk from "gi://Gtk?version=4.0";
 import Adw from "gi://Adw?version=1";
 import Gdk from "gi://Gdk?version=4.0";
+import GdkPixbuf from "gi://GdkPixbuf?version=2.0";
 import { extractAccent } from "./lib/paletteManager.js";
+import { buildCutoutMask } from "./lib/wallpaperMask.js";
 
 const SCHEMA_ID = "org.gnome.shell.extensions.live-wallpaper@codeworks2";
 
@@ -369,7 +371,7 @@ export default class LiveWallpaperPrefs {
         const layering = new Adw.PreferencesGroup({
             title: "Wallpaper layering",
             description:
-                "Optional depth effect: particles pass behind the dark foreground of your wallpaper (mountains, skylines). Off by default; falls back automatically if the image has no clean split.",
+                "Optional depth effect: particles pass behind the dark foreground of your wallpaper (mountains, skylines). Off by default; fades out automatically when the image has no clean split.",
         });
         const layeringRow = new Adw.ActionRow({
             title: "Enable layering",
@@ -387,6 +389,87 @@ export default class LiveWallpaperPrefs {
             "active",
             Gio.SettingsBindFlags.DEFAULT
         );
+
+        // Live preview of the cutout at the current threshold. Computed at
+        // preview size (cheap) from a cached downsample — the slider never
+        // re-decodes the full-resolution wallpaper.
+        const previewRow = new Adw.ActionRow({
+            title: "Cutout preview",
+        });
+        const previewImage = new Gtk.Image({
+            valign: Gtk.Align.CENTER,
+            halign: Gtk.Align.START,
+            margin_top: 6,
+            margin_bottom: 6,
+        });
+        previewRow.add_suffix(previewImage);
+        layering.add(previewRow);
+        let previewCache = null; // {pb: Pixbuf, w, h, uri}
+        const bgSettings = Gio.Settings.new("org.gnome.desktop.background");
+        const loadPreview = () => {
+            const uri = bgSettings.get_string("picture-uri");
+            if (previewCache && previewCache.uri === uri) return previewCache;
+            previewCache = null;
+            let path = uri || "";
+            if (path.startsWith("file://")) path = decodeURIComponent(path.slice(7));
+            if (!GLib.file_test(path, GLib.FileTest.EXISTS)) return null;
+            try {
+                const pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 360, 360, true);
+                previewCache = { pb, w: pb.get_width(), h: pb.get_height(), uri };
+                return previewCache;
+            } catch (e) {
+                return null;
+            }
+        };
+        const renderPreview = () => {
+            const cached = loadPreview();
+            if (!cached) {
+                previewImage.clear();
+                previewRow.subtitle = "Could not read the wallpaper image";
+                return;
+            }
+            const { pb, w, h } = cached;
+            const stride = pb.get_rowstride();
+            const n = pb.get_n_channels();
+            const px = pb.get_pixels();
+            const threshold = settings.get_double("layering-threshold");
+            const mask = buildCutoutMask(w, h, (x, y) => {
+                const i = y * stride + x * n;
+                return (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / 255;
+            }, threshold);
+            const pct = mask ? Math.round(mask.coverage * 100) : null;
+            if (mask === null) {
+                previewRow.subtitle =
+                    `No clean split at this cutoff (foreground ${pct ?? "—"}%) — effect off`;
+                previewImage.clear();
+                return;
+            }
+            let out = pb;
+            if (!out.get_has_alpha()) out = out.add_alpha(false, 0, 0, 0);
+            const oStride = out.get_rowstride();
+            const oPx = out.get_pixels();
+            const oN = out.get_n_channels();
+            for (let y = 0; y < h; y++) {
+                for (let x = 0; x < w; x++) {
+                    const i = y * oStride + x * oN;
+                    oPx[i + 3] = Math.round(255 * mask.alpha[y * w + x]);
+                }
+            }
+            previewImage.set_from_pixbuf(out);
+            previewRow.subtitle =
+                `Foreground covers ${pct}% of the image — drag to tune the split`;
+        };
+        renderPreview();
+        layeringSwitch.connect("notify::active", () => {
+            previewImage.visible = layeringSwitch.active;
+            if (layeringSwitch.active) renderPreview();
+        });
+        previewImage.visible = settings.get_boolean("wallpaper-layering");
+        settings.connect("changed::layering-threshold", renderPreview);
+        bgSettings.connect("changed::picture-uri", () => {
+            previewCache = null;
+            renderPreview();
+        });
         addScale(layering, settings, "Silhouette cutoff", "layering-threshold", 0.1, 0.9, 0.05);
         page.add(layering);
 

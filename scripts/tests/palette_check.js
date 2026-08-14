@@ -55,6 +55,20 @@ async function main() {
     check("mask: threshold respected (dark cutoff moves)",
         buildCutoutMask(64, 64, (x, y) => (y < 32 ? 0.4 : 0.15), 0.3) !== null);
 
+    // Fade near the coverage bounds: the effect must not pop on/off.
+    const nearFloor = buildCutoutMask(100, 100,
+        (x, y) => (x < 14 && y < 14 ? 0.05 : 0.9), 0.5); // ~2% foreground
+    check("mask: coverage below floor -> null (faded out)",
+        nearFloor === null, nearFloor ? `coverage=${nearFloor.coverage.toFixed(3)}` : "");
+    const midFade = buildCutoutMask(100, 100,
+        (x, y) => (x < 28 && y < 28 ? 0.05 : 0.9), 0.5); // ~8% foreground
+    check("mask: near-floor coverage scales alpha down",
+        midFade !== null && midFade.coverage > 0.07 && midFade.coverage < 0.09 &&
+            midFade.alpha[0] < 1.0,
+        midFade
+            ? `coverage=${midFade.coverage.toFixed(3)} alpha0=${midFade.alpha[0].toFixed(2)}`
+            : "");
+
     // Solid red -> hue must be ~0 (deterministic).
     const red = extractAccent("file:///tmp/opencode/test_red.png");
     check("solid red wallpaper -> accent extracted", red !== null,

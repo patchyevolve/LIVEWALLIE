@@ -5,6 +5,7 @@
 
 const MIN_COVERAGE = 0.05;
 const MAX_COVERAGE = 0.95;
+const FADE_MARGIN = 0.04;
 
 export interface CutoutResult {
     /** 0..1 per-pixel foreground opacity, row-major, width*height entries. */
@@ -12,9 +13,10 @@ export interface CutoutResult {
     coverage: number;
 }
 
-/** Luminance threshold with a soft edge. Returns null when the split is
- *  degenerate (mask covers almost none or almost all of the image) — the
- *  caller must then fall back to a flat overlay. */
+/** Luminance threshold with a soft edge. The whole mask fades toward
+ *  transparent as coverage approaches the bounds, so crossing them doesn't
+ *  pop the effect on/off abruptly. Returns null when coverage is fully
+ *  outside the valid range — the caller must then fall back to flat. */
 export function buildCutoutMask(
     width: number,
     height: number,
@@ -37,6 +39,16 @@ export function buildCutoutMask(
         }
     }
     const coverage = covered / (width * height);
-    if (coverage < MIN_COVERAGE || coverage > MAX_COVERAGE) return null;
+    const fade =
+        clamp((coverage - MIN_COVERAGE) / FADE_MARGIN, 0, 1) *
+        clamp((MAX_COVERAGE - coverage) / FADE_MARGIN, 0, 1);
+    if (fade <= 0.02) return null;
+    if (fade < 1) {
+        for (let i = 0; i < alpha.length; i++) alpha[i] *= fade;
+    }
     return { alpha, coverage };
+}
+
+function clamp(v: number, lo: number, hi: number) {
+    return Math.min(hi, Math.max(lo, v));
 }
