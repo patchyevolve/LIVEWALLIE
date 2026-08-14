@@ -192,7 +192,7 @@ export default class LiveWallpaperPrefs {
             deepspace: [
                 ["palette-mode", "arc"],
                 ["fixed-hue", 300],
-                ["idle-speed", 1],
+                ["idle-speed", 0.7],
                 ["music-speed", 1],
                 ["shimmer", true],
                 ["bass-gravity", true],
