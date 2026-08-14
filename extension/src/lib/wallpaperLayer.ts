@@ -4,7 +4,7 @@ import GdkPixbuf from "gi://GdkPixbuf";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
 import St from "gi://St";
-import { buildCutoutMask, type CutoutResult } from "./wallpaperMask.js";
+import { applyMaskToPixbuf, buildCutoutMask, type CutoutResult } from "./wallpaperMask.js";
 
 /**
  * §6 wallpaper layering — optional depth effect, strictly additive.
@@ -106,7 +106,7 @@ export class WallpaperLayer {
                 this._clearContent();
                 return;
             }
-            const masked = this._applyMask(pixbuf, mask);
+            const masked = applyMaskToPixbuf(pixbuf, mask.alpha);
             const w = masked.get_width();
             const h = masked.get_height();
             const stride = masked.get_rowstride();
@@ -155,27 +155,6 @@ export class WallpaperLayer {
             const i = y * stride + x * n;
             return (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / 255;
         }, this._threshold);
-    }
-
-    /** Applies the mask to the pixbuf's alpha channel (in-place when possible;
- *  if the source had no alpha channel, returns a new alpha-added pixbuf). */
-    private _applyMask(pb: GdkPixbuf.Pixbuf, mask: CutoutResult): GdkPixbuf.Pixbuf {
-        let target = pb;
-        if (!target.get_has_alpha()) {
-            target = target.add_alpha(false, 0, 0, 0)!;
-        }
-        const n = target.get_n_channels();
-        const stride = target.get_rowstride();
-        const px = target.get_pixels();
-        const w = target.get_width();
-        const h = target.get_height();
-        for (let y = 0; y < h; y++) {
-            for (let x = 0; x < w; x++) {
-                const i = y * stride + x * n;
-                px[i + 3] = Math.round(255 * clamp(mask.alpha[y * w + x], 0, 1));
-            }
-        }
-        return target;
     }
 
     private _clearContent() {

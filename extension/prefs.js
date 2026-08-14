@@ -12,7 +12,7 @@ import Adw from "gi://Adw?version=1";
 import Gdk from "gi://Gdk?version=4.0";
 import GdkPixbuf from "gi://GdkPixbuf?version=2.0";
 import { extractAccent } from "./lib/paletteManager.js";
-import { buildCutoutMask } from "./lib/wallpaperMask.js";
+import { applyMaskToPixbuf, buildCutoutMask } from "./lib/wallpaperMask.js";
 
 const SCHEMA_ID = "org.gnome.shell.extensions.live-wallpaper@codeworks2";
 
@@ -460,17 +460,7 @@ export default class LiveWallpaperPrefs {
                     "Drag the cutoff toward the other end.";
                 return;
             }
-            let out = pb;
-            if (!out.get_has_alpha()) out = out.add_alpha(false, 0, 0, 0);
-            const oStride = out.get_rowstride();
-            const oPx = out.get_pixels();
-            const oN = out.get_n_channels();
-            for (let y = 0; y < h; y++) {
-                for (let x = 0; x < w; x++) {
-                    const i = y * oStride + x * oN;
-                    oPx[i + 3] = Math.round(255 * mask.alpha[y * w + x]);
-                }
-            }
+            let out = applyMaskToPixbuf(pb, mask.alpha);
             picture.paintable = Gdk.Texture.new_for_pixbuf(out);
             previewLabel.label =
                 `Foreground covers ${pct}% of the image — the masked area is painted ` +

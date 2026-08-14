@@ -33,7 +33,24 @@ async function main() {
     const { extractAccent } = await importMod("lib/paletteManager.js");
 
     // §6 cutout mask: pure function, testable standalone.
-    const { buildCutoutMask } = await importMod("lib/wallpaperMask.js");
+    const { buildCutoutMask, applyMaskToPixbuf } = await importMod("lib/wallpaperMask.js");
+    const GdkPixbuf = imports.gi.GdkPixbuf;
+
+    // Regression: get_pixels() returns a COPY in modern GJS — mask writes
+    // must land in the pixbuf, or the front layer renders fully opaque.
+    const src = GdkPixbuf.Pixbuf.new(GdkPixbuf.Colorspace.RGB, false, 8, 8, 8);
+    src.fill(0x808080ff);
+    const alpha = new Array(64).fill(1);
+    for (let i = 0; i < 32; i++) alpha[i] = 0;
+    const masked = applyMaskToPixbuf(src, alpha);
+    const mPx = masked.get_pixels();
+    const mN = masked.get_n_channels();
+    check("masked pixbuf has alpha channel", masked.get_has_alpha(), `channels=${mN}`);
+    check("masked pixbuf alpha lands (0 in top half)",
+        mPx[3] === 0, `a=${mPx[3]}`);
+    check("masked pixbuf alpha lands (255 in bottom half)",
+        mPx[(7 * masked.get_rowstride()) + 3] === 255,
+        `a=${mPx[(7 * masked.get_rowstride()) + 3]}`);
 
     // Sky (bright) top half, dark silhouette bottom half -> valid split.
     const split = buildCutoutMask(64, 64, (x, y) => (y < 32 ? 0.8 : 0.2), 0.5);
