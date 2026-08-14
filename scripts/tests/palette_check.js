@@ -33,7 +33,7 @@ async function main() {
     const { extractAccent } = await importMod("lib/paletteManager.js");
 
     // §6 cutout mask: pure function, testable standalone.
-    const { buildCutoutMask, applyMaskToPixbuf, computeCoverMask } = await importMod("lib/wallpaperMask.js");
+    const { buildCutoutMask, applyMaskToPixbuf, computeCoverMask, invertCutout } = await importMod("lib/wallpaperMask.js");
     const GdkPixbuf = imports.gi.GdkPixbuf;
 
     // Regression: get_pixels() returns a COPY in modern GJS — mask writes
@@ -104,6 +104,53 @@ async function main() {
         check("alpha wallpaper mask in range", cmA.coverage > 0.4 && cmA.coverage < 0.9,
             `c=${cmA.coverage.toFixed(3)}`);
     }
+
+    // Inversion: bright areas become foreground. Invert the portrait cover
+    // mask (coverage 0.5): alpha flips, coverage stays 0.5.
+    const inv = invertCutout(cm);
+    check("invert keeps mask valid", inv !== null, `c=${inv ? inv.coverage : "null"}`);
+    if (inv) {
+        const iRows = [0, 1, 2, 3].map((y) => inv.alpha[y * 4] > 0.5);
+        check("invert flips rows (0-1 dark -> flat)",
+            !iRows[0] && !iRows[1], `rows=${iRows.join(",")}`);
+        check("invert flips rows (2-3 bright -> foreground)",
+            iRows[2] && iRows[3], `rows=${iRows.join(",")}`);
+        check("invert coverage symmetric", Math.abs(inv.coverage - cm.coverage) < 1e-9,
+            `c=${inv.coverage}`);
+    }
+    // computeCoverMask(invert=true) matches the manual inversion.
+    const cmInv = computeCoverMask(coverSrc, 4, 4, 0.5, true);
+    check("cover mask inverted via computeCoverMask", cmInv !== null && Math.abs(cmInv.coverage - 0.5) < 0.01,
+        `c=${cmInv ? cmInv.coverage : "null"}`);
+    // Black screen: all-dark source -> normal reading covers everything
+    // (null), and inversion finds nothing bright either (null).
+    const blackBuf = new Uint8Array(4 * 4 * 3);
+    const blackSrc = GdkPixbuf.Pixbuf.new_from_bytes(
+        GLib.Bytes.new(blackBuf), GdkPixbuf.Colorspace.RGB, false, 8, 4, 4, 12
+    );
+    check("pure black: normal mask null", computeCoverMask(blackSrc, 4, 4, 0.5) === null, "");
+    check("pure black: inverted mask null", computeCoverMask(blackSrc, 4, 4, 0.5, true) === null, "");
+    // Dark wallpaper with a bright moon (top-right 2x2 of 4x4): normal
+    // reading covers 75% (valid), inverted covers the moon (25%).
+    const darkBuf = new Uint8Array(4 * 4 * 3);
+    for (let y = 0; y < 4; y++) {
+        for (let x = 0; x < 4; x++) {
+            const i = (y * 4 + x) * 3;
+            const v = x >= 2 && y < 2 ? 0xee : 0x11;
+            darkBuf[i] = v; darkBuf[i + 1] = v; darkBuf[i + 2] = v;
+        }
+    }
+    const darkSrc = GdkPixbuf.Pixbuf.new_from_bytes(
+        GLib.Bytes.new(darkBuf), GdkPixbuf.Colorspace.RGB, false, 8, 4, 4, 12
+    );
+    const darkNormal = computeCoverMask(darkSrc, 4, 4, 0.5);
+    const darkInv = computeCoverMask(darkSrc, 4, 4, 0.5, true);
+    check("dark wallpaper: normal mask valid (75% dark)",
+        darkNormal !== null && Math.abs(darkNormal.coverage - 0.75) < 0.05,
+        `c=${darkNormal ? darkNormal.coverage : "null"}`);
+    check("dark wallpaper: inverted finds bright moon",
+        darkInv !== null && Math.abs(darkInv.coverage - 0.25) < 0.05,
+        `c=${darkInv ? darkInv.coverage : "null"}`);
 
     // Sky (bright) top half, dark silhouette bottom half -> valid split.
     const split = buildCutoutMask(64, 64, (x, y) => (y < 32 ? 0.8 : 0.2), 0.5);

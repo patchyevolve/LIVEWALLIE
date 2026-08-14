@@ -12,7 +12,7 @@ import Adw from "gi://Adw?version=1";
 import Gdk from "gi://Gdk?version=4.0";
 import GdkPixbuf from "gi://GdkPixbuf?version=2.0";
 import { extractAccent } from "./lib/paletteManager.js";
-import { applyMaskToPixbuf, buildCutoutMask } from "./lib/wallpaperMask.js";
+import { applyMaskToPixbuf, buildCutoutMask, invertCutout } from "./lib/wallpaperMask.js";
 
 const SCHEMA_ID = "org.gnome.shell.extensions.live-wallpaper@codeworks2";
 
@@ -390,6 +390,24 @@ export default class LiveWallpaperPrefs {
             Gio.SettingsBindFlags.DEFAULT
         );
         addScale(layering, settings, "Silhouette cutoff", "layering-threshold", 0.1, 0.9, 0.05);
+        const invertRow = new Adw.ActionRow({
+            title: "Invert layer",
+            subtitle:
+                "Hide particles behind the BRIGHT areas instead — use this on dark or black wallpapers, where the normal reading would cover the whole screen.",
+        });
+        const invertSwitch = new Gtk.Switch({
+            valign: Gtk.Align.CENTER,
+            active: settings.get_boolean("layering-invert"),
+        });
+        invertRow.add_suffix(invertSwitch);
+        invertRow.set_activatable_widget(invertSwitch);
+        layering.add(invertRow);
+        settings.bind(
+            "layering-invert",
+            invertSwitch,
+            "active",
+            Gio.SettingsBindFlags.DEFAULT
+        );
         page.add(layering);
 
         // Cutout preview — the actual wallpaper picture with the current
@@ -448,10 +466,12 @@ export default class LiveWallpaperPrefs {
             const n = pb.get_n_channels();
             const px = pb.get_pixels();
             const threshold = settings.get_double("layering-threshold");
-            const mask = buildCutoutMask(w, h, (x, y) => {
+            const invert = settings.get_boolean("layering-invert");
+            const raw = buildCutoutMask(w, h, (x, y) => {
                 const i = y * stride + x * n;
                 return (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / 255;
             }, threshold);
+            const mask = raw && invert ? invertCutout(raw) : raw;
             const pct = mask ? Math.round(mask.coverage * 100) : null;
             if (mask === null) {
                 picture.paintable = null;
@@ -463,17 +483,16 @@ export default class LiveWallpaperPrefs {
             let out = applyMaskToPixbuf(pb, mask.alpha);
             picture.paintable = Gdk.Texture.new_for_pixbuf(out);
             previewLabel.label =
-                `Foreground covers ${pct}% of the image — the masked area is painted ` +
-                "on top of the particles; the rest stays transparent.";
+                `${invert ? "Inverted — bright" : "Dark"} foreground covers ${pct}% of the image — ` +
+                "particles fade out there; the rest stays transparent.";
         };
         renderPreview();
         settings.connect("changed::layering-threshold", renderPreview);
+        settings.connect("changed::layering-invert", renderPreview);
         bgSettings.connect("changed::picture-uri", () => {
             previewCache = null;
             renderPreview();
         });
-        addScale(layering, settings, "Silhouette cutoff", "layering-threshold", 0.1, 0.9, 0.05);
-        page.add(layering);
 
         // ---- Screens ---------------------------------------------------
         const screens = new Adw.PreferencesGroup({

@@ -37,6 +37,7 @@ export class WallpaperForeground {
         w: number;
         h: number;
         threshold: number;
+        invert: boolean;
         alpha: ForegroundMask;
     } | null = null;
     private _ids: number[] = [];
@@ -70,6 +71,11 @@ export class WallpaperForeground {
                     this._refresh()
                 )
             );
+            this._ids.push(
+                this._settings.connect("changed::layering-invert", () =>
+                    this._refresh()
+                )
+            );
         }
     }
 
@@ -88,12 +94,14 @@ export class WallpaperForeground {
         }
         const uri = this._backgroundSettings.get_string("picture-uri");
         const threshold = s.get_double("layering-threshold");
+        const invert = s.get_boolean("layering-invert");
         if (
             this._maskCache &&
             this._maskCache.uri === uri &&
             this._maskCache.w === this._width &&
             this._maskCache.h === this._height &&
-            this._maskCache.threshold === threshold
+            this._maskCache.threshold === threshold &&
+            this._maskCache.invert === invert
         ) {
             return this._maskCache.alpha;
         }
@@ -104,9 +112,21 @@ export class WallpaperForeground {
         const alpha: ForegroundMask =
             pb === null
                 ? null
-                : computeCoverMask(pb, this._width, this._height, threshold)
-                      ?.alpha ?? null;
-        this._maskCache = { uri, w: this._width, h: this._height, threshold, alpha };
+                : computeCoverMask(
+                      pb,
+                      this._width,
+                      this._height,
+                      threshold,
+                      invert
+                  )?.alpha ?? null;
+        this._maskCache = {
+            uri,
+            w: this._width,
+            h: this._height,
+            threshold,
+            invert,
+            alpha,
+        };
         return alpha;
     }
 

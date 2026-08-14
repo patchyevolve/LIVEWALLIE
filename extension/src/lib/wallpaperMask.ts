@@ -52,6 +52,25 @@ export function buildCutoutMask(
     return { alpha, coverage };
 }
 
+/** Inverted cutout: bright areas become the foreground (particles hide
+ *  behind bright objects — works on dark/black wallpapers where the
+ *  normal dark-foreground reading covers the whole screen). Coverage
+ *  sanity runs on the INVERTED result with a relaxed low bound so dark
+ *  wallpapers with a small bright region still produce a mask. */
+export function invertCutout(result: CutoutResult): CutoutResult | null {
+    const alpha = new Array<number>(result.alpha.length);
+    for (let i = 0; i < alpha.length; i++) alpha[i] = 1 - result.alpha[i];
+    const coverage = 1 - result.coverage;
+    const fade =
+        clamp((coverage - 0.02) / FADE_MARGIN, 0, 1) *
+        clamp((MAX_COVERAGE - coverage) / FADE_MARGIN, 0, 1);
+    if (fade <= 0.02) return null;
+    if (fade < 1) {
+        for (let i = 0; i < alpha.length; i++) alpha[i] *= fade;
+    }
+    return { alpha, coverage };
+}
+
 function clamp(v: number, lo: number, hi: number) {
     return Math.min(hi, Math.max(lo, v));
 }
@@ -99,7 +118,8 @@ export function computeCoverMask(
     src: GdkPixbuf.Pixbuf,
     w: number,
     h: number,
-    threshold: number
+    threshold: number,
+    invert = false
 ): CutoutResult | null {
     const iw = src.get_width();
     const ih = src.get_height();
@@ -137,8 +157,9 @@ export function computeCoverMask(
     const stride = crop.get_rowstride();
     const n = crop.get_n_channels();
     const px = crop.get_pixels();
-    return buildCutoutMask(w, h, (x, y) => {
+    const raw = buildCutoutMask(w, h, (x, y) => {
         const i = y * stride + x * n;
         return (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / 255;
     }, threshold);
+    return raw && invert ? invertCutout(raw) : raw;
 }
