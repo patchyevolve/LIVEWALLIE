@@ -389,21 +389,36 @@ export default class LiveWallpaperPrefs {
             "active",
             Gio.SettingsBindFlags.DEFAULT
         );
+        addScale(layering, settings, "Silhouette cutoff", "layering-threshold", 0.1, 0.9, 0.05);
+        page.add(layering);
 
-        // Live preview of the cutout at the current threshold. Computed at
-        // preview size (cheap) from a cached downsample — the slider never
-        // re-decodes the full-resolution wallpaper.
-        const previewRow = new Adw.ActionRow({
+        // Cutout preview — the actual wallpaper picture with the current
+        // mask applied, always visible so the cutoff slider is tunable.
+        // Computed at preview size from a cached downsample; the slider
+        // never re-decodes the full-resolution wallpaper.
+        const preview = new Adw.PreferencesGroup({
             title: "Cutout preview",
         });
-        const previewImage = new Gtk.Image({
+        const picture = new Gtk.Picture({
             valign: Gtk.Align.CENTER,
-            halign: Gtk.Align.START,
+            halign: Gtk.Align.FILL,
+            hexpand: true,
+            height_request: 240,
             margin_top: 6,
             margin_bottom: 6,
+            can_shrink: true,
         });
-        previewRow.add_suffix(previewImage);
-        layering.add(previewRow);
+        preview.add(picture);
+        const previewLabel = new Gtk.Label({
+            label: "",
+            halign: Gtk.Align.START,
+            wrap: true,
+            xalign: 0,
+            margin_bottom: 6,
+        });
+        preview.add(previewLabel);
+        page.add(preview);
+
         let previewCache = null; // {pb: Pixbuf, w, h, uri}
         const bgSettings = Gio.Settings.new("org.gnome.desktop.background");
         const loadPreview = () => {
@@ -414,7 +429,7 @@ export default class LiveWallpaperPrefs {
             if (path.startsWith("file://")) path = decodeURIComponent(path.slice(7));
             if (!GLib.file_test(path, GLib.FileTest.EXISTS)) return null;
             try {
-                const pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 360, 360, true);
+                const pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 640, 640, true);
                 previewCache = { pb, w: pb.get_width(), h: pb.get_height(), uri };
                 return previewCache;
             } catch (e) {
@@ -424,8 +439,8 @@ export default class LiveWallpaperPrefs {
         const renderPreview = () => {
             const cached = loadPreview();
             if (!cached) {
-                previewImage.clear();
-                previewRow.subtitle = "Could not read the wallpaper image";
+                picture.paintable = null;
+                previewLabel.label = "Could not read the wallpaper image";
                 return;
             }
             const { pb, w, h } = cached;
@@ -439,9 +454,10 @@ export default class LiveWallpaperPrefs {
             }, threshold);
             const pct = mask ? Math.round(mask.coverage * 100) : null;
             if (mask === null) {
-                previewRow.subtitle =
-                    `No clean split at this cutoff (foreground ${pct ?? "—"}%) — effect off`;
-                previewImage.clear();
+                picture.paintable = null;
+                previewLabel.label =
+                    `No clean split at this cutoff (foreground ${pct ?? "—"}%) — effect off. ` +
+                    "Drag the cutoff toward the other end.";
                 return;
             }
             let out = pb;
@@ -455,16 +471,12 @@ export default class LiveWallpaperPrefs {
                     oPx[i + 3] = Math.round(255 * mask.alpha[y * w + x]);
                 }
             }
-            previewImage.set_from_pixbuf(out);
-            previewRow.subtitle =
-                `Foreground covers ${pct}% of the image — drag to tune the split`;
+            picture.paintable = Gdk.Texture.new_for_pixbuf(out);
+            previewLabel.label =
+                `Foreground covers ${pct}% of the image — the masked area is painted ` +
+                "on top of the particles; the rest stays transparent.";
         };
         renderPreview();
-        layeringSwitch.connect("notify::active", () => {
-            previewImage.visible = layeringSwitch.active;
-            if (layeringSwitch.active) renderPreview();
-        });
-        previewImage.visible = settings.get_boolean("wallpaper-layering");
         settings.connect("changed::layering-threshold", renderPreview);
         bgSettings.connect("changed::picture-uri", () => {
             previewCache = null;
