@@ -89,5 +89,14 @@
       <default>false</default>
       <summary>§6 inverted layering: treat the BRIGHT areas as foreground instead — particles hide behind bright objects. Useful on dark/black wallpapers where the normal dark-foreground reading would cover the whole screen.</summary>
     </key>
+    <key name="layering-mode" type="s">
+      <default>"luminance"</default>
+      <choices>
+        <choice value="luminance"/>
+        <choice value="edges"/>
+        <choice value="auto"/>
+      </choices>
+      <summary>§6 silhouette detection: "luminance" = brightness split (default); "edges" = object-boundary silhouettes for low-contrast images; "auto" = brightness first, edges fallback.</summary>
+    </key>
   </schema>
 </schemalist>

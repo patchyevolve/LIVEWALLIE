@@ -12,7 +12,12 @@ import Adw from "gi://Adw?version=1";
 import Gdk from "gi://Gdk?version=4.0";
 import GdkPixbuf from "gi://GdkPixbuf?version=2.0";
 import { extractAccent } from "./lib/paletteManager.js";
-import { applyMaskToPixbuf, buildCutoutMask, invertCutout } from "./lib/wallpaperMask.js";
+import {
+    applyMaskToPixbuf,
+    buildCutoutMask,
+    buildEdgeMask,
+    invertCutout,
+} from "./lib/wallpaperMask.js";
 
 const SCHEMA_ID = "org.gnome.shell.extensions.live-wallpaper@codeworks2";
 
@@ -408,6 +413,25 @@ export default class LiveWallpaperPrefs {
             "active",
             Gio.SettingsBindFlags.DEFAULT
         );
+        const MODE_VALUES = ["auto", "edges", "luminance"];
+        const edgeRow = new Adw.ActionRow({
+            title: "Edge detection",
+            subtitle:
+                "Find silhouettes by object boundaries instead of brightness. Try it when the wallpaper has no clear bright/dark split — keep it OFF for busy or textured images, where it gets noisy.",
+        });
+        const edgeSwitch = new Gtk.Switch({
+            valign: Gtk.Align.CENTER,
+            active: settings.get_string("layering-mode") === "edges",
+        });
+        edgeRow.add_suffix(edgeSwitch);
+        edgeRow.set_activatable_widget(edgeSwitch);
+        layering.add(edgeRow);
+        edgeSwitch.connect("notify::active", () => {
+            settings.set_string(
+                "layering-mode",
+                edgeSwitch.active ? "edges" : "luminance"
+            );
+        });
         page.add(layering);
 
         // Cutout preview — the actual wallpaper picture with the current
@@ -467,28 +491,47 @@ export default class LiveWallpaperPrefs {
             const px = pb.get_pixels();
             const threshold = settings.get_double("layering-threshold");
             const invert = settings.get_boolean("layering-invert");
-            const raw = buildCutoutMask(w, h, (x, y) => {
+            const mode = settings.get_string("layering-mode");
+            const lum = (x, y) => {
                 const i = y * stride + x * n;
                 return (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / 255;
-            }, threshold);
-            const mask = raw && invert ? invertCutout(raw) : raw;
+            };
+            let mask = null;
+            let used = "luminance";
+            if (mode === "edges") {
+                mask = buildEdgeMask(w, h, lum);
+                used = "edges";
+            } else if (mode === "luminance") {
+                mask = buildCutoutMask(w, h, lum, threshold);
+            } else {
+                mask = buildCutoutMask(w, h, lum, threshold);
+                if (mask === null) {
+                    mask = buildEdgeMask(w, h, lum);
+                    used = "edges";
+                }
+            }
+            if (mask && invert) mask = invertCutout(mask);
             const pct = mask ? Math.round(mask.coverage * 100) : null;
             if (mask === null) {
                 picture.paintable = null;
                 previewLabel.label =
                     `No clean split at this cutoff (foreground ${pct ?? "—"}%) — effect off. ` +
-                    "Drag the cutoff toward the other end.";
+                    (edgeSwitch.active
+                        ? "Try the brightness reading (turn Edge detection off), or drag the cutoff."
+                        : "Enable Edge detection, or drag the cutoff toward the other end.");
                 return;
             }
             let out = applyMaskToPixbuf(pb, mask.alpha);
             picture.paintable = Gdk.Texture.new_for_pixbuf(out);
             previewLabel.label =
-                `${invert ? "Inverted — bright" : "Dark"} foreground covers ${pct}% of the image — ` +
+                `${invert ? "Inverted — bright" : "Dark"} foreground covers ${pct}% of the image ` +
+                `(${used === "edges" ? "edges detection" : "brightness split"}) — ` +
                 "particles fade out there; the rest stays transparent.";
         };
         renderPreview();
         settings.connect("changed::layering-threshold", renderPreview);
         settings.connect("changed::layering-invert", renderPreview);
+        settings.connect("changed::layering-mode", renderPreview);
         bgSettings.connect("changed::picture-uri", () => {
             previewCache = null;
             renderPreview();

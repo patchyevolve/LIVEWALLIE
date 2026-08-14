@@ -33,7 +33,7 @@ async function main() {
     const { extractAccent } = await importMod("lib/paletteManager.js");
 
     // §6 cutout mask: pure function, testable standalone.
-    const { buildCutoutMask, applyMaskToPixbuf, computeCoverMask, invertCutout } = await importMod("lib/wallpaperMask.js");
+    const { buildCutoutMask, applyMaskToPixbuf, computeCoverMask, invertCutout, buildEdgeMask } = await importMod("lib/wallpaperMask.js");
     const GdkPixbuf = imports.gi.GdkPixbuf;
 
     // Regression: get_pixels() returns a COPY in modern GJS — mask writes
@@ -151,6 +151,62 @@ async function main() {
     check("dark wallpaper: inverted finds bright moon",
         darkInv !== null && Math.abs(darkInv.coverage - 0.25) < 0.05,
         `c=${darkInv ? darkInv.coverage : "null"}`);
+
+    // ---- Edge detection (§6 layering-mode) -----------------------------
+    // Bright mountain on dark sky: luminance split reads the dark sky as
+    // foreground (covers everything -> null), but edges must still find
+    // the mountain shape (bottom region, cut off by the boundary).
+    const edgeBuf = new Uint8Array(8 * 8 * 3);
+    for (let y = 0; y < 8; y++) {
+        for (let x = 0; x < 8; x++) {
+            const i = (y * 8 + x) * 3;
+            const v = y < 4 ? 0x22 : 0xdd;
+            edgeBuf[i] = v; edgeBuf[i + 1] = v; edgeBuf[i + 2] = v;
+        }
+    }
+    const edgeSrc = GdkPixbuf.Pixbuf.new_from_bytes(
+        GLib.Bytes.new(edgeBuf), GdkPixbuf.Colorspace.RGB, false, 8, 8, 8, 24
+    );
+    const edgeLum = (x, y) => {
+        const i = y * 24 + x * 3;
+        return edgeBuf[i] / 255;
+    };
+    const edgeMask = buildEdgeMask(8, 8, edgeLum);
+    check("edges: bright mountain on dark sky found",
+        edgeMask !== null, `c=${edgeMask ? edgeMask.coverage.toFixed(3) : "null"}`);
+    if (edgeMask) {
+        check("edges: coverage in 0.5..0.9 (barrier rows count as foreground)",
+            edgeMask.coverage >= 0.5 && edgeMask.coverage <= 0.9,
+            `c=${edgeMask.coverage.toFixed(3)}`);
+        check("edges: sky row near flat", edgeMask.alpha[0] < 0.45,
+            `a=${edgeMask.alpha[0].toFixed(2)}`);
+        check("edges: mountain row foreground", edgeMask.alpha[7 * 8] > 0.8,
+            `a=${edgeMask.alpha[7 * 8].toFixed(2)}`);
+    }
+    // Same image through luminance: the dark sky reads as foreground with
+    // coverage 0.5 — valid, but the "silhouette" is the sky (semantically
+    // flipped). Edges mode is the fix for that reading.
+    const edgeLumMode = computeCoverMask(edgeSrc, 8, 8, 0.5, false, "luminance");
+    check("luminance mode valid on bright mountain (sky-as-foreground, c=0.5)",
+        edgeLumMode !== null && Math.abs(edgeLumMode.coverage - 0.5) < 0.05,
+        `c=${edgeLumMode ? edgeLumMode.coverage : "null"}`);
+    // Auto mode prefers the luminance path when it is valid.
+    const edgeAuto = computeCoverMask(edgeSrc, 8, 8, 0.5, false, "auto");
+    check("auto mode valid on bright mountain",
+        edgeAuto !== null && Math.abs(edgeAuto.coverage - 0.5) < 0.05,
+        `c=${edgeAuto ? edgeAuto.coverage.toFixed(3) : "null"}`);
+    // Edges + invert: mountain becomes flat, dark sky becomes foreground.
+    const edgeInv = invertCutout(edgeMask);
+    check("edges + invert valid", edgeInv !== null, `c=${edgeInv ? edgeInv.coverage : "null"}`);
+    // Flat image: no edges -> null in every mode.
+    const flatBuf = new Uint8Array(8 * 8 * 3).fill(0x77);
+    const flatSrc = GdkPixbuf.Pixbuf.new_from_bytes(
+        GLib.Bytes.new(flatBuf), GdkPixbuf.Colorspace.RGB, false, 8, 8, 8, 24
+    );
+    check("flat image: edges mode null",
+        computeCoverMask(flatSrc, 8, 8, 0.5, false, "edges") === null, "");
+    check("flat image: auto mode null",
+        computeCoverMask(flatSrc, 8, 8, 0.5, false, "auto") === null, "");
 
     // Sky (bright) top half, dark silhouette bottom half -> valid split.
     const split = buildCutoutMask(64, 64, (x, y) => (y < 32 ? 0.8 : 0.2), 0.5);

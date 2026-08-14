@@ -1,7 +1,7 @@
 import GdkPixbuf from "gi://GdkPixbuf";
 import Gio from "gi://Gio";
 import GLib from "gi://GLib";
-import { computeCoverMask } from "./wallpaperMask.js";
+import { computeCoverMask, type MaskMode } from "./wallpaperMask.js";
 
 /**
  * §6 wallpaper layering — the particle-suppression technique.
@@ -38,6 +38,7 @@ export class WallpaperForeground {
         h: number;
         threshold: number;
         invert: boolean;
+        mode: MaskMode;
         alpha: ForegroundMask;
     } | null = null;
     private _ids: number[] = [];
@@ -76,6 +77,11 @@ export class WallpaperForeground {
                     this._refresh()
                 )
             );
+            this._ids.push(
+                this._settings.connect("changed::layering-mode", () =>
+                    this._refresh()
+                )
+            );
         }
     }
 
@@ -95,13 +101,15 @@ export class WallpaperForeground {
         const uri = this._backgroundSettings.get_string("picture-uri");
         const threshold = s.get_double("layering-threshold");
         const invert = s.get_boolean("layering-invert");
+        const mode = (s.get_string("layering-mode") ?? "auto") as MaskMode;
         if (
             this._maskCache &&
             this._maskCache.uri === uri &&
             this._maskCache.w === this._width &&
             this._maskCache.h === this._height &&
             this._maskCache.threshold === threshold &&
-            this._maskCache.invert === invert
+            this._maskCache.invert === invert &&
+            this._maskCache.mode === mode
         ) {
             return this._maskCache.alpha;
         }
@@ -117,7 +125,8 @@ export class WallpaperForeground {
                       this._width,
                       this._height,
                       threshold,
-                      invert
+                      invert,
+                      mode
                   )?.alpha ?? null;
         this._maskCache = {
             uri,
@@ -125,6 +134,7 @@ export class WallpaperForeground {
             h: this._height,
             threshold,
             invert,
+            mode,
             alpha,
         };
         return alpha;
