@@ -38,6 +38,7 @@ export class MonitorManager {
     private _monitorsChangedId: number | null = null;
     private _fullscreenChangedId: number | null = null;
     private _settingsChangedId: number | null = null;
+    private _obscuredPollId: number | null = null;
 
     constructor(
         client: SceneClient,
@@ -56,7 +57,19 @@ export class MonitorManager {
         );
         this._fullscreenChangedId = global.display.connect(
             "in-fullscreen-changed",
-            () => this._updateFullscreen()
+            () => this._updatePaused()
+        );
+        // Light poll (1.4Hz): pause a monitor's layer whenever any real
+        // window covers part of it — covers fullscreen (even if the
+        // signal missed it) and smaller windows, which the signal never
+        // reports. Cost is negligible; the wall of window actors is small.
+        this._obscuredPollId = GLib.timeout_add(
+            GLib.PRIORITY_DEFAULT,
+            700,
+            () => {
+                this._updatePaused();
+                return GLib.SOURCE_CONTINUE;
+            }
         );
         this._settingsChangedId = this._settings?.connect(
             "changed",
@@ -65,7 +78,8 @@ export class MonitorManager {
                     key === "disabled-screens" ||
                     key === "master-enabled" ||
                     key === "wallpaper-layering" ||
-                    key === "layering-threshold"
+                    key === "layering-threshold" ||
+                    key === "pause-obscured"
                 ) {
                     this._rebuild();
                 }
@@ -193,13 +207,49 @@ export class MonitorManager {
         return s ? s.get_boolean("pause-fullscreen") : true;
     }
 
-    private _updateFullscreen() {
-        const pause = this._pauseOnFullscreen();
+    /** Any visible real window (not desktop/dock, not during overview)
+     *  overlapping this monitor? */
+    private _windowObscures(monitor: any): boolean {
+        const mX = monitor.x;
+        const mY = monitor.y;
+        const mW = monitor.width;
+        const mH = monitor.height;
+        try {
+            for (const actor of global.get_window_actors()) {
+                const win =
+                    actor.get_meta_window?.() ?? (actor as any).meta_window;
+                if (!win || !win.get_visible()) continue;
+                const type = win.get_window_type();
+                if (type === 11 /* Meta.WindowType.DESKTOP */) continue;
+                if (type === 10 /* Meta.WindowType.DOCK */) continue;
+                const r = win.get_frame_rect();
+                if (
+                    r.x < mX + mW &&
+                    r.x + r.width > mX &&
+                    r.y < mY + mH &&
+                    r.y + r.height > mY
+                ) {
+                    return true;
+                }
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    private _updatePaused() {
+        const pauseFull = this._pauseOnFullscreen();
+        const s = this._settings;
+        const pauseObscured = s ? s.get_boolean("pause-obscured") : true;
+        const inOverview = Main.overview?.visible ?? false;
         for (const entry of this._entries) {
-            const inFullscreen = global.display.get_monitor_in_fullscreen(
+            const fullscreen = global.display.get_monitor_in_fullscreen(
                 entry.monitor.index
             );
-            if (pause && inFullscreen) {
+            const obscured =
+                pauseObscured &&
+                !inOverview &&
+                this._windowObscures(entry.monitor);
+            if ((pauseFull && fullscreen) || obscured) {
                 entry.layer.pause();
             } else {
                 entry.layer.resume();
@@ -223,6 +273,10 @@ export class MonitorManager {
         if (this._fullscreenChangedId !== null) {
             global.display.disconnect(this._fullscreenChangedId);
             this._fullscreenChangedId = null;
+        }
+        if (this._obscuredPollId !== null) {
+            GLib.source_remove(this._obscuredPollId);
+            this._obscuredPollId = null;
         }
         if (this._settingsChangedId !== null) {
             this._settings?.disconnect(this._settingsChangedId);

@@ -9,6 +9,10 @@
       <default>true</default>
       <summary>Pause the animation when a window is fullscreen on a screen</summary>
     </key>
+    <key name="pause-obscured" type="b">
+      <default>true</default>
+      <summary>Pause the animation on a screen whenever any window covers part of it (not just fullscreen). Keeps the particle field still behind windows.</summary>
+    </key>
     <key name="idle-speed" type="d">
       <default>0.7</default>
       <range min="0" max="5"/>

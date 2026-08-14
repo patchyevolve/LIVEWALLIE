@@ -180,6 +180,13 @@ export default class LiveWallpaperPrefs {
             "Stop the animation while a window covers a screen",
             "pause-fullscreen"
         );
+        addSwitch(
+            general,
+            settings,
+            "Pause behind windows",
+            "Stop the animation on a screen whenever any window covers part of it — the field stays still behind windows, not just in fullscreen",
+            "pause-obscured"
+        );
         page.add(general);
 
         // ---- Scene presets ----------------------------------------------
