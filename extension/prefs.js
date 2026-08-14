@@ -219,7 +219,7 @@ export default class LiveWallpaperPrefs {
             rain: [
                 ["palette-mode", "fixed"],
                 ["fixed-hue", 212],
-                ["idle-speed", 1.5],
+                ["idle-speed", 0.4],
                 ["music-speed", 1.6],
                 ["shimmer", false],
                 ["bass-gravity", true],
