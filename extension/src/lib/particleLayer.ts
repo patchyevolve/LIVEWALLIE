@@ -436,7 +436,7 @@ export class ParticleLayer {
             }
         }
         this._emberNextMs -= dt;
-        if (this._emberNextMs <= 0) {
+        if (inSystem && this._emberNextMs <= 0) {
             this._emberNextMs = 8000 + Math.random() * 12000;
             const cx = w * (0.1 + Math.random() * 0.8);
             const cy = h * (0.1 + Math.random() * 0.8);
@@ -644,14 +644,15 @@ export class ParticleLayer {
             // CPU load rising, not sustained. Lifts lightness too, so it
             // shows against busy dark wallpapers.
             let waveLift = 0;
-            if (this._waveX >= -240) {
+            if (inSystem && this._waveX >= -240) {
                 const wd = Math.abs(p.x - this._waveX);
                 if (wd < 240) waveLift = 1 - wd / 240;
             }
             if (waveLift > 0) l = Math.min(95, l + waveLift * 20);
             // Wandering embers: fixed warm amber, big and bright — they must
-            // pop against the cool field, not blend into it.
-            const ember = p.emberT > 0;
+            // pop against the cool field, not blend into it. System mode
+            // only (they'd read as system effects in music mode).
+            const ember = p.emberT > 0 && inSystem;
             if (ember) {
                 hue = 45 + p.seed * 15;
                 l = Math.min(95, l + 28 * p.emberT);
@@ -697,7 +698,8 @@ export class ParticleLayer {
         }
         // GPU-driven mood accents: short sparks with glow + core + streak,
         // fading over ~1.5s. The streak is 0.5s of travel (vx is px/s).
-        for (const a of this._eventAccents) {
+        // System mode only — a mid-flight spark dies with the mode switch.
+        if (inSystem) for (const a of this._eventAccents) {
             if (this._cellCovered(a.x, a.y)) continue;
             const [r, g, b] = hslToRgb(a.hue, 0.55, 0.65);
             const life = Math.max(0, a.life);
@@ -715,7 +717,8 @@ export class ParticleLayer {
         }
         // Tide wave overlay: a soft warm band sweeping across, drawn on top
         // so it reads as a light sweep even against busy wallpapers.
-        if (this._waveX >= -240) {
+        // System mode only — a wave mid-flight vanishes on mode switch.
+        if (inSystem && this._waveX >= -240) {
             const nowMs = Date.now();
             if (nowMs - this._waveLogMs > 200) {
                 this._waveLogMs = nowMs;
@@ -733,7 +736,7 @@ export class ParticleLayer {
         }
         // Wave start marker: a quick soft tint (not a hard flash), so the
         // sweep reads as an event without stroking the screen.
-        if (this._waveFlashMs > 0) {
+        if (inSystem && this._waveFlashMs > 0) {
             const a = 0.18 * (this._waveFlashMs / 350);
             cr.setSourceRGBA(1, 0.9, 0.75, a);
             cr.rectangle(0, 0, this._width, this._height);
