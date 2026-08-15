@@ -684,18 +684,36 @@ export class ParticleLayer {
             cr.setLineWidth(2);
             cr.stroke();
         }
-        // GPU-driven mood accents: occasional short sparks, rate-limited,
-        // fading and shrinking over their ~1.5s life. Trail = 0.3s of
-        // travel (vx is px/s — multiplying by 20 drew screen-length lines).
+        // GPU-driven mood accents: short sparks with glow + core + streak,
+        // fading over ~1.5s. The streak is 0.5s of travel (vx is px/s).
         for (const a of this._eventAccents) {
             if (this._cellCovered(a.x, a.y)) continue;
             const [r, g, b] = hslToRgb(a.hue, 0.55, 0.65);
             const life = Math.max(0, a.life);
-            cr.setSourceRGBA(r, g, b, 0.55 * life);
+            cr.setSourceRGBA(r, g, b, 0.25 * life);
+            cr.arc(a.x, a.y, 9 * life, 0, 2 * Math.PI);
+            cr.fill();
+            cr.setSourceRGBA(r, g, b, 0.85 * life);
+            cr.arc(a.x, a.y, 3.2, 0, 2 * Math.PI);
+            cr.fill();
+            cr.setSourceRGBA(r, g, b, 0.6 * life);
             cr.moveTo(a.x, a.y);
-            cr.lineTo(a.x - a.vx * 0.3 * life, a.y - a.vy * 0.3 * life);
-            cr.setLineWidth(2);
+            cr.lineTo(a.x - a.vx * 0.5 * life, a.y - a.vy * 0.5 * life);
+            cr.setLineWidth(2.4);
             cr.stroke();
+        }
+        // Tide wave overlay: a soft warm band sweeping across, drawn on top
+        // so it reads as a light sweep even against busy wallpapers.
+        if (this._waveX >= 0) {
+            const x0 = this._waveX - 240;
+            const x1 = this._waveX + 240;
+            const grad = cr.createLinearGradient(x0, 0, x1, 0);
+            grad.addColorStop(0, "rgba(255, 235, 200, 0)");
+            grad.addColorStop(0.5, "rgba(255, 235, 200, 0.16)");
+            grad.addColorStop(1, "rgba(255, 235, 200, 0)");
+            cr.setSource(grad);
+            cr.rectangle(x0, 0, 480, this._height);
+            cr.fill();
         }
     }
 }
