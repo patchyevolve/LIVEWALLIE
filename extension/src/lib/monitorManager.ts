@@ -249,9 +249,9 @@ export class MonitorManager {
                     actor.get_meta_window?.() ??
                     (actor as any).meta_window;
                 // Actors only exist for mapped windows; actor visibility
-                // reflects the active workspace (MetaWindow has no
-                // get_visible in mutter 18).
-                if (!win || !(actor as any).get_visible()) continue;
+                // reflects the active workspace. Note: mutter 18's Clutter
+                // exposes no get_visible() method — only the property.
+                if (!win || !(actor as any).visible) continue;
                 const type = win.get_window_type();
                 if (type === 1 /* Meta.WindowType.DESKTOP */) continue;
                 if (type === 2 /* Meta.WindowType.DOCK */) continue;
