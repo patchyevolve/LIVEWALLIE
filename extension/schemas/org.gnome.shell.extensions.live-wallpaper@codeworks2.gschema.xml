@@ -11,7 +11,7 @@
     </key>
     <key name="pause-obscured" type="b">
       <default>true</default>
-      <summary>Grid-based hiding: the field freezes and stops rendering behind windows of any size (48px cells); only visible areas animate.</summary>
+      <summary>Grid-based hiding: nothing renders behind windows of any size (48px cells); the field keeps flowing invisibly behind them.</summary>
     </key>
     <key name="idle-speed" type="d">
       <default>0.7</default>

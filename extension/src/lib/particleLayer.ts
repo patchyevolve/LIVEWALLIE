@@ -371,8 +371,9 @@ export class ParticleLayer {
         const ptrR2 = ptrR * ptrR;
 
         for (const p of this._particles) {
-            // Grid-obscured cells: freeze (don't step) hidden particles.
-            if (this._cellCovered(p.x, p.y)) continue;
+            // Covered cells skip RENDERING (in _draw), never stepping —
+            // the field keeps flowing invisibly behind windows so particles
+            // emerge on the other side.
             const baseSpeed = (6 + p.depth * 34) * speedMul * (1 + surge);
             p.vx = baseSpeed + drift;
             // All velocities are px/s; the single *s below converts to px per
