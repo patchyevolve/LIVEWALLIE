@@ -47,6 +47,8 @@ export class MonitorManager {
     private _fullscreenChangedId: number | null = null;
     private _settingsChangedId: number | null = null;
     private _obscuredPollId: number | null = null;
+    /** Last covered/none band per layer size, for transition logging. */
+    private _lastGridBand = new Map<string, number>();
 
     constructor(
         client: SceneClient,
@@ -223,35 +225,6 @@ export class MonitorManager {
         return s ? s.get_boolean("pause-fullscreen") : true;
     }
 
-/** Any visible real window (not desktop/dock, not during overview)
- *  overlapping this monitor? */
-    private _windowObscures(monitor: any): boolean {
-        const mX = monitor.x;
-        const mY = monitor.y;
-        const mW = monitor.width;
-        const mH = monitor.height;
-        try {
-            for (const actor of global.get_window_actors()) {
-                const win =
-                    actor.get_meta_window?.() ?? (actor as any).meta_window;
-                if (!win || !win.get_visible()) continue;
-                const type = win.get_window_type();
-                if (type === 11 /* Meta.WindowType.DESKTOP */) continue;
-                if (type === 10 /* Meta.WindowType.DOCK */) continue;
-                const r = win.get_frame_rect();
-                if (
-                    r.x < mX + mW &&
-                    r.x + r.width > mX &&
-                    r.y < mY + mH &&
-                    r.y + r.height > mY
-                ) {
-                    return true;
-                }
-            }
-        } catch (e) {}
-        return false;
-    }
-
     /** Obscured-window grid in LAYER coordinates (orientation-adjusted):
      *  cell = 1 where any real window covers it. Windows spanning monitors
      *  mark cells on both. */
@@ -265,14 +238,21 @@ export class MonitorManager {
         const cols = Math.ceil(layerW / cell);
         const rows = Math.ceil(layerH / cell);
         const grid = new Uint8Array(cols * rows);
+        let actors = 0;
+        let windows = 0;
+        let covered = 0;
         try {
             for (const actor of global.get_window_actors()) {
+                actors++;
                 const win =
-                    actor.get_meta_window?.() ?? (actor as any).meta_window;
+                    actor.metaWindow ??
+                    actor.get_meta_window?.() ??
+                    (actor as any).meta_window;
                 if (!win || !win.get_visible()) continue;
                 const type = win.get_window_type();
-                if (type === 11 /* Meta.WindowType.DESKTOP */) continue;
-                if (type === 10 /* Meta.WindowType.DOCK */) continue;
+                if (type === 1 /* Meta.WindowType.DESKTOP */) continue;
+                if (type === 2 /* Meta.WindowType.DOCK */) continue;
+                windows++;
                 const r = win.get_frame_rect();
                 const ix0 = Math.max(r.x, layerX);
                 const iy0 = Math.max(r.y, layerY);
@@ -281,15 +261,39 @@ export class MonitorManager {
                 if (ix1 <= ix0 || iy1 <= iy0) continue;
                 const gx0 = Math.max(0, Math.floor((ix0 - layerX) / cell));
                 const gy0 = Math.max(0, Math.floor((iy0 - layerY) / cell));
-                const gx1 = Math.min(cols - 1, Math.floor((ix1 - 1 - layerX) / cell));
-                const gy1 = Math.min(rows - 1, Math.floor((iy1 - 1 - layerY) / cell));
+                const gx1 = Math.min(
+                    cols - 1,
+                    Math.floor((ix1 - 1 - layerX) / cell)
+                );
+                const gy1 = Math.min(
+                    rows - 1,
+                    Math.floor((iy1 - 1 - layerY) / cell)
+                );
                 for (let gy = gy0; gy <= gy1; gy++) {
                     for (let gx = gx0; gx <= gx1; gx++) {
-                        grid[gy * cols + gx] = 1;
+                        if (grid[gy * cols + gx] === 0) {
+                            grid[gy * cols + gx] = 1;
+                            covered++;
+                        }
                     }
                 }
             }
-        } catch (e) {}
+        } catch (e) {
+            console.warn(
+                `[live-wallpaper] grid scan failed: ${e}`
+            );
+            return grid;
+        }
+        // Diagnostic: report only on covered/none transitions (no spam).
+        const key = `${layerW}x${layerH}`;
+        const band = covered > 0 ? 1 : 0;
+        if (this._lastGridBand.get(key) !== band) {
+            this._lastGridBand.set(key, band);
+            console.log(
+                `[live-wallpaper] grid: ${windows}/${actors} windows, ` +
+                    `${covered}/${grid.length} cells covered (${key})`
+            );
+        }
         return grid;
     }
 
