@@ -633,18 +633,21 @@ export class ParticleLayer {
                 l = l + (90 - l) * e;
             }
             // Traveling tide wave: a soft brightness band sweeping across —
-            // CPU load rising, not sustained.
+            // CPU load rising, not sustained. Lifts lightness too, so it
+            // shows against busy dark wallpapers.
             let waveLift = 0;
             if (this._waveX >= 0) {
                 const wd = Math.abs(p.x - this._waveX);
                 if (wd < 170) waveLift = 1 - wd / 170;
             }
-            // Wandering embers: warm, bright sparks with a short trail.
+            if (waveLift > 0) l = Math.min(95, l + waveLift * 16);
+            // Wandering embers: fixed warm amber, big and bright — they must
+            // pop against the cool field, not blend into it.
             const ember = p.emberT > 0;
             if (ember) {
-                hue = (hue + 30) % 360;
-                l = Math.min(95, l + 20 * p.emberT);
-                waveLift = Math.max(waveLift, 0.5 * p.emberT);
+                hue = 45 + p.seed * 15;
+                l = Math.min(95, l + 28 * p.emberT);
+                waveLift = Math.max(waveLift, 0.6 * p.emberT);
             }
             const [r, g, b] = hslToRgb(hue, s / 100, l / 100);
             // Depth twinkle (far stars pulse slowly), beat breath, and the
@@ -665,7 +668,8 @@ export class ParticleLayer {
             }
             if (a <= 0.003) continue;
             cr.setSourceRGBA(r, g, b, a);
-            cr.arc(p.x, p.y, p.size, 0, 2 * Math.PI);
+            const radius = ember ? p.size * (1 + 0.8 * p.emberT) : p.size;
+            cr.arc(p.x, p.y, radius, 0, 2 * Math.PI);
             cr.fill();
         }
 
@@ -681,16 +685,16 @@ export class ParticleLayer {
             cr.stroke();
         }
         // GPU-driven mood accents: occasional short sparks, rate-limited,
-        // fading and shrinking over their ~1.5s life. Trail = 0.2s of
+        // fading and shrinking over their ~1.5s life. Trail = 0.3s of
         // travel (vx is px/s — multiplying by 20 drew screen-length lines).
         for (const a of this._eventAccents) {
             if (this._cellCovered(a.x, a.y)) continue;
-            const [r, g, b] = hslToRgb(a.hue, 0.5, 0.6);
+            const [r, g, b] = hslToRgb(a.hue, 0.55, 0.65);
             const life = Math.max(0, a.life);
-            cr.setSourceRGBA(r, g, b, 0.45 * life);
+            cr.setSourceRGBA(r, g, b, 0.55 * life);
             cr.moveTo(a.x, a.y);
-            cr.lineTo(a.x - a.vx * 0.2 * life, a.y - a.vy * 0.2 * life);
-            cr.setLineWidth(1.4);
+            cr.lineTo(a.x - a.vx * 0.3 * life, a.y - a.vy * 0.3 * life);
+            cr.setLineWidth(2);
             cr.stroke();
         }
     }
