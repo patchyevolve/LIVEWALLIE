@@ -105,7 +105,6 @@ export class ParticleLayer {
     private _waveSpeed = 0;
     private _waveFlashMs = 0;
     private _waveLogMs = 0;
-    private _drawLogMs = 0;
     private _emberNextMs = 8000 + Math.random() * 12000; // first ember soon-ish
     private _eventAccents: StreakAccent[] = [];
 
@@ -571,11 +570,6 @@ export class ParticleLayer {
     private _draw(cr: any) {
         const state = this._client.getState();
         this._accent = this._getAccent();
-        const nowMs = Date.now();
-        if (nowMs - this._drawLogMs > 500) {
-            this._drawLogMs = nowMs;
-            log(`[live-wallpaper] draw frame (${this._width}x${this._height}) waveX=${this._waveX} flash=${this._waveFlashMs} accents=${this._eventAccents.length}`);
-        }
 
         // Hue arc input: heat (system) | bass/treble balance (audio).
         let t: number;
