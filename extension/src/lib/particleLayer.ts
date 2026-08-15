@@ -650,6 +650,9 @@ export class ParticleLayer {
                 waveLift = Math.max(waveLift, 0.6 * p.emberT);
             }
             const [r, g, b] = hslToRgb(hue, s / 100, l / 100);
+            // Traveling tide bulge: particles under the band physically rise
+            // (a swell passing through the field), then settle as it moves on.
+            const py = p.y - waveLift * 55;
             // Depth twinkle (far stars pulse slowly), beat breath, and the
             // mode-driven ambient brightness — all uniform, no displacement.
             const twinkle = 0.85 + 0.15 * Math.sin(this._tMs * (0.001 + p.depth * 0.002) + p.seed * 6.283);
@@ -661,7 +664,7 @@ export class ParticleLayer {
             const fg = this._foreground;
             if (fg) {
                 const sx = Math.floor(p.x);
-                const sy = Math.floor(p.y);
+                const sy = Math.floor(py);
                 if (sx >= 0 && sy >= 0 && sx < fg.w && sy < fg.h) {
                     a *= 1 - fg.alpha[sy * fg.w + sx];
                 }
@@ -669,7 +672,7 @@ export class ParticleLayer {
             if (a <= 0.003) continue;
             cr.setSourceRGBA(r, g, b, a);
             const radius = ember ? p.size * (1 + 0.8 * p.emberT) : p.size;
-            cr.arc(p.x, p.y, radius, 0, 2 * Math.PI);
+            cr.arc(p.x, py, radius, 0, 2 * Math.PI);
             cr.fill();
         }
 
@@ -690,16 +693,16 @@ export class ParticleLayer {
             if (this._cellCovered(a.x, a.y)) continue;
             const [r, g, b] = hslToRgb(a.hue, 0.55, 0.65);
             const life = Math.max(0, a.life);
-            cr.setSourceRGBA(r, g, b, 0.25 * life);
-            cr.arc(a.x, a.y, 9 * life, 0, 2 * Math.PI);
+            cr.setSourceRGBA(r, g, b, 0.28 * life);
+            cr.arc(a.x, a.y, 14 * life, 0, 2 * Math.PI);
             cr.fill();
-            cr.setSourceRGBA(r, g, b, 0.85 * life);
-            cr.arc(a.x, a.y, 3.2, 0, 2 * Math.PI);
+            cr.setSourceRGBA(r, g, b, 0.9 * life);
+            cr.arc(a.x, a.y, 5, 0, 2 * Math.PI);
             cr.fill();
-            cr.setSourceRGBA(r, g, b, 0.6 * life);
+            cr.setSourceRGBA(r, g, b, 0.65 * life);
             cr.moveTo(a.x, a.y);
             cr.lineTo(a.x - a.vx * 0.5 * life, a.y - a.vy * 0.5 * life);
-            cr.setLineWidth(2.4);
+            cr.setLineWidth(3);
             cr.stroke();
         }
         // Tide wave overlay: a soft warm band sweeping across, drawn on top
