@@ -105,6 +105,7 @@ export class ParticleLayer {
     private _waveSpeed = 0;
     private _waveFlashMs = 0;
     private _waveLogMs = 0;
+    private _drawLogMs = 0;
     private _emberNextMs = 8000 + Math.random() * 12000; // first ember soon-ish
     private _eventAccents: StreakAccent[] = [];
 
@@ -410,6 +411,7 @@ export class ParticleLayer {
         //   - Embers: telemetry-independent rare clusters that drift through
         //     diagonally — life even on a fully idle machine.
         if (inSystem && this._mood.consumeTideWave(state.system, nowMs)) {
+            log(`[live-wallpaper] wave fired on layer ${this._width}x${this._height}`);
             this._waveX = -160;
             this._waveSpeed = w / 4500; // ~4.5s to cross the field
             this._waveFlashMs = 500;
@@ -421,9 +423,12 @@ export class ParticleLayer {
         if (this._waveFlashMs > 0) this._waveFlashMs = Math.max(0, this._waveFlashMs - dt);
         if (inSystem && this._mood.consumeAccentEvent(dt, nowMs)) {
             if (this._eventAccents.length < 4) {
+                const x = Math.random() * w;
+                const y = Math.random() * h;
+                log(`[live-wallpaper] spark spawned (${Math.round(x)},${Math.round(y)})`);
                 this._eventAccents.push({
-                    x: Math.random() * w,
-                    y: Math.random() * h,
+                    x,
+                    y,
                     vx: (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 60),
                     vy: 0,
                     hue: Math.random() < 0.5 ? 190 : 20,
@@ -566,6 +571,11 @@ export class ParticleLayer {
     private _draw(cr: any) {
         const state = this._client.getState();
         this._accent = this._getAccent();
+        const nowMs = Date.now();
+        if (nowMs - this._drawLogMs > 500) {
+            this._drawLogMs = nowMs;
+            log(`[live-wallpaper] draw frame (${this._width}x${this._height}) waveX=${this._waveX} flash=${this._waveFlashMs} accents=${this._eventAccents.length}`);
+        }
 
         // Hue arc input: heat (system) | bass/treble balance (audio).
         let t: number;
@@ -695,7 +705,6 @@ export class ParticleLayer {
         // fading over ~1.5s. The streak is 0.5s of travel (vx is px/s).
         for (const a of this._eventAccents) {
             if (this._cellCovered(a.x, a.y)) continue;
-            log(`[live-wallpaper] draw: spark at (${Math.round(a.x)},${Math.round(a.y)}) life=${a.life.toFixed(2)}`);
             const [r, g, b] = hslToRgb(a.hue, 0.55, 0.65);
             const life = Math.max(0, a.life);
             cr.setSourceRGBA(r, g, b, 0.28 * life);
