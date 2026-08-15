@@ -101,7 +101,7 @@ export class ParticleLayer {
     // each frame; events (tide wave, GPU accents, embers) are rate-limited
     // and fire on changes, not absolute levels.
     private _mood = new SystemMood(Date.now());
-    private _waveX = -1; // traveling brightness wave position, -1 = inactive
+    private _waveX = -999; // traveling brightness wave position, < -240 = inactive
     private _waveSpeed = 0;
     private _waveFlashMs = 0;
     private _waveLogMs = 0;
@@ -203,6 +203,9 @@ export class ParticleLayer {
     pause() {
         this._running = false;
         this._stopTimer();
+        // A mid-sweep wave must not freeze on screen while paused — kill it.
+        this._waveX = -999;
+        this._waveFlashMs = 0;
     }
 
     resume() {
@@ -417,7 +420,7 @@ export class ParticleLayer {
         }
         if (this._waveX >= -240) {
             this._waveX += this._waveSpeed * dt;
-            if (this._waveX > w + 120) this._waveX = -1;
+            if (this._waveX > w + 120) this._waveX = -999;
         }
         if (this._waveFlashMs > 0) this._waveFlashMs = Math.max(0, this._waveFlashMs - dt);
         if (inSystem && this._mood.consumeAccentEvent(dt, nowMs)) {
