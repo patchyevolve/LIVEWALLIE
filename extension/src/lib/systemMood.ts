@@ -103,6 +103,7 @@ export class SystemMood {
             if (!this._cpuKnown) {
                 this._cpu = sys.cpu;
                 this._cpuKnown = true;
+                console.log(`[live-wallpaper] mood seeded cpu=${(this._cpu * 100).toFixed(0)}%`);
             } else {
                 this._cpu += (sys.cpu - this._cpu) * kC;
             }

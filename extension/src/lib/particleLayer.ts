@@ -435,9 +435,11 @@ export class ParticleLayer {
                 });
             }
         }
-        this._emberNextMs -= dt;
+        // Rare ambient life: one small ember cluster every 1-2 minutes —
+        // a glimpse, not a constant procession.
+        if (inSystem) this._emberNextMs -= dt;
         if (inSystem && this._emberNextMs <= 0) {
-            this._emberNextMs = 8000 + Math.random() * 12000;
+            this._emberNextMs = 60000 + Math.random() * 60000;
             const cx = w * (0.1 + Math.random() * 0.8);
             const cy = h * (0.1 + Math.random() * 0.8);
             // Near-horizontal drift (within ±34° of the x axis) so embers
