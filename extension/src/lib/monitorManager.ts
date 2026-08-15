@@ -313,15 +313,22 @@ export class MonitorManager {
             // overview, covered cells freeze+hide particles behind windows
             // of any size. Fullscreen still pauses the whole layer.
             let grid: Uint8Array | null = null;
+            let fullyCovered = false;
             if (pauseObscured && !inOverview) {
                 grid = this._coveredGrid(entry.x, entry.y, entry.w, entry.h);
+                // Fully covered: stop the layer's timeline entirely — no
+                // stepping, no repaint. That's where the real CPU saving
+                // is (skipping particle arcs still repaints the actor).
+                let covered = 0;
+                for (let i = 0; i < grid.length; i++) covered += grid[i];
+                fullyCovered = covered === grid.length;
             }
             entry.layer.setCoveredGrid(
                 grid,
                 Math.ceil(entry.w / GRID_CELL),
                 GRID_CELL
             );
-            if (pauseFull && fullscreen) {
+            if ((pauseFull && fullscreen) || fullyCovered) {
                 entry.layer.pause();
             } else {
                 entry.layer.resume();
