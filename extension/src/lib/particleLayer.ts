@@ -5,6 +5,7 @@ import Gio from "gi://Gio";
 import { type SceneClient } from "./sceneClient.js";
 import type { Pulse, Stream } from "./sceneState.js";
 import type { PaletteAccent } from "./paletteManager.js";
+import { SystemMood } from "./systemMood.js";
 
 const FLASH_DURATION_MS = 200; // ease-out-cubic back to ambient
 const EASE_TAU_MS = 180; // field interpolation time constant
@@ -22,6 +23,9 @@ interface Particle {
     seed: number; // 0..1, per-particle phase
     size: number;
     flashT: number; // 1 = full flash, decays to 0 over 200ms
+    emberVx: number; // wandering-ember velocity override (0 = not an ember)
+    emberVy: number;
+    emberT: number; // 1 → 0 ember lifetime
 }
 
 interface StreakAccent {
@@ -85,6 +89,15 @@ export class ParticleLayer {
     private _surge = 0; // 1 = beat just fired; multiplies drift speed, decays ~250ms
     private _breath = 0; // beat "breath": whole-field brightness bump, decays ~300ms
     private _fieldAlpha = 0.85; // eased ambient brightness (music brightens the field)
+
+    // Mood pipeline (System mode): telemetry → slow visual mood. Consumed
+    // each frame; events (tide wave, GPU accents, embers) are rate-limited
+    // and fire on changes, not absolute levels.
+    private _mood = new SystemMood(Date.now());
+    private _waveX = -1; // traveling brightness wave position, -1 = inactive
+    private _waveSpeed = 0;
+    private _emberNextMs = 8000 + Math.random() * 12000; // first ember soon-ish
+    private _eventAccents: StreakAccent[] = [];
 
     // Eased/interpolated field targets.
     private _intensity = 0;
@@ -289,11 +302,17 @@ export class ParticleLayer {
 
         this._adjustCount(targetCount);
         // Ambient brightness: music lifts the whole field (mode change = mood
-        // change, not a different app). Eased, uniform — never per-particle.
-        const targetAlpha = state.mode === "music" ? 1 : 0.85;
+        // change, not a different app). System mode: battery mood dims/boosts
+        // slowly (minutes-scale, nonlinear). Eased, uniform — never
+        // per-particle.
+        const nowMs = Date.now();
+        this._mood.update(state.system, dt);
+        const moodBright =
+            state.mode === "system" ? this._mood.getBrightness() : 1;
+        const targetAlpha = (state.mode === "music" ? 1 : 0.85) * moodBright;
         this._fieldAlpha += (targetAlpha - this._fieldAlpha) * (1 - Math.exp(-dt / 400));
         this._breath *= Math.exp(-dt / 300);
-        this._stepParticles(dt);
+        this._stepParticles(dt, state, nowMs);
         this._stepAccents(dt);
     }
 
@@ -317,10 +336,13 @@ export class ParticleLayer {
             seed: Math.random(),
             size: 1.2 + depth * 2.2,
             flashT: 0,
+            emberVx: 0,
+            emberVy: 0,
+            emberT: 0,
         });
     }
 
-    private _stepParticles(dt: number) {
+    private _stepParticles(dt: number, state: any, nowMs: number) {
         const w = this._width;
         const h = this._height;
         this._tMs += dt;
@@ -346,7 +368,11 @@ export class ParticleLayer {
         const surgeMul = s0 ? s0.get_double("beat-strength") : 1;
         const streamOn = s0 ? s0.get_boolean("stream-drift") : true;
         const streamMul = s0 ? s0.get_double("stream-strength") : 1;
-        const speedMul = (1 + this._intensity * 1.6 * musicMul) * idleMul;
+        let speedMul = (1 + this._intensity * 1.6 * musicMul) * idleMul;
+        // Mood multipliers: idle breathing (±5%, telemetry-independent, both
+        // modes) and the CPU tide (±10%, System mode only, τ≈6s).
+        const inSystem = state.mode === "system";
+        speedMul *= this._mood.getBreath(nowMs) * (inSystem ? this._mood.getTide() : 1);
         const surge = surgeOn ? this._surge * surgeMul : 0;
         this._surge *= Math.exp(-dt / 250);
         const gravity = bassOn ? this._gravityBias * 90 * bassMul : 0; // px/s, bass rain
@@ -369,6 +395,54 @@ export class ParticleLayer {
             }
         }
         const ptrR2 = ptrR * ptrR;
+
+        // Mood events (System mode, rate-limited, change-driven):
+        //   - tide wave: CPU rising >12% above its mood → a soft brightness
+        //     band sweeps across the field once.
+        //   - GPU accent: smoothed GPU load accumulates a probability; each
+        //     hit spawns one short streak, never a meter.
+        //   - Embers: telemetry-independent rare clusters that drift through
+        //     diagonally — life even on a fully idle machine.
+        if (inSystem && this._mood.consumeTideWave(state.system, nowMs)) {
+            this._waveX = -120;
+            this._waveSpeed = w / 2600; // ~2.6s to cross the field
+        }
+        if (this._waveX >= 0) {
+            this._waveX += this._waveSpeed * dt;
+            if (this._waveX > w + 120) this._waveX = -1;
+        }
+        if (inSystem && this._mood.consumeAccentEvent(dt, nowMs)) {
+            if (this._eventAccents.length < 4) {
+                this._eventAccents.push({
+                    x: Math.random() * w,
+                    y: Math.random() * h,
+                    vx: (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 60),
+                    vy: 0,
+                    hue: Math.random() < 0.5 ? 190 : 20,
+                });
+            }
+        }
+        this._emberNextMs -= dt;
+        if (this._emberNextMs <= 0) {
+            this._emberNextMs = 8000 + Math.random() * 12000;
+            const cx = w * (0.1 + Math.random() * 0.8);
+            const cy = h * (0.1 + Math.random() * 0.8);
+            const ang = Math.random() * 2 * Math.PI;
+            const spd = 80 + Math.random() * 60;
+            const evx = Math.cos(ang) * spd;
+            const evy = Math.sin(ang) * spd;
+            let n = 0;
+            for (const p of this._particles) {
+                const dx = p.x - cx;
+                const dy = p.y - cy;
+                if (dx * dx + dy * dy < 90 * 90) {
+                    p.emberVx = evx;
+                    p.emberVy = evy;
+                    p.emberT = 1;
+                    if (++n >= 8) break;
+                }
+            }
+        }
 
         for (const p of this._particles) {
             // Covered cells skip RENDERING (in _draw), never stepping —
@@ -399,6 +473,13 @@ export class ParticleLayer {
                     p.vx += (dxp / d) * push + (-dyp / d) * swirl;
                     p.vy += (dyp / d) * push + (dxp / d) * swirl;
                 }
+            }
+            // Ember override: drifting embers steer themselves for their
+            // lifetime (≈4s), then hand control back to the field.
+            if (p.emberT > 0) {
+                p.vx = p.emberVx;
+                p.vy = p.emberVy;
+                p.emberT = Math.max(0, p.emberT - dt / 4000);
             }
             p.x += p.vx * s;
             p.y += p.vy * s;
@@ -448,6 +529,12 @@ export class ParticleLayer {
             if (a.y < -30) a.y = this._height + 20;
             if (a.y > this._height + 30) a.y = -20;
         }
+        // Mood event accents (GPU-driven): constant-velocity streaks.
+        for (const a of this._eventAccents) {
+            a.x += a.vx * dt;
+            if (a.x < -30) a.x = this._width + 20;
+            if (a.x > this._width + 30) a.x = -20;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -486,13 +573,20 @@ export class ParticleLayer {
                 ligBase = 25 + accent.lig * 0.4 + 30 * this._intensity;
             }
         }
+        // System mode: the temperature mood owns the hue (slow, τ≈25s) —
+        // cool idle = indigo/cyan, load = amber. A tiny ±4° wobble keeps it
+        // alive without ever twitching.
+        const inSystem = state.mode === "system";
+        if (inSystem) {
+            baseHue = (this._mood.getHue() + 4 * Math.sin(this._tMs * 0.0003) + 360) % 360;
+        }
         const sat = clamp(satBase, 40, 90);
         const lig = clamp(ligBase, 32, 60);
 
         for (const p of this._particles) {
             // Grid-obscured cells: don't render hidden particles.
             if (this._cellCovered(p.x, p.y)) continue;
-            const hue = (baseHue + (p.seed - 0.5) * 14 + 360) % 360;
+            let hue = (baseHue + (p.seed - 0.5) * 14 + 360) % 360;
             let s = sat;
             let l = lig + (p.seed - 0.5) * 8;
             if (p.flashT > 0) {
@@ -501,12 +595,27 @@ export class ParticleLayer {
                 s = s + (10 - s) * e;
                 l = l + (90 - l) * e;
             }
+            // Traveling tide wave: a soft brightness band sweeping across —
+            // CPU load rising, not sustained.
+            let waveLift = 0;
+            if (this._waveX >= 0) {
+                const wd = Math.abs(p.x - this._waveX);
+                if (wd < 100) waveLift = 1 - wd / 100;
+            }
+            // Wandering embers: warm, bright sparks with a short trail.
+            const ember = p.emberT > 0;
+            if (ember) {
+                hue = (hue + 30) % 360;
+                l = Math.min(95, l + 20 * p.emberT);
+                waveLift = Math.max(waveLift, 0.5 * p.emberT);
+            }
             const [r, g, b] = hslToRgb(hue, s / 100, l / 100);
             // Depth twinkle (far stars pulse slowly), beat breath, and the
             // mode-driven ambient brightness — all uniform, no displacement.
             const twinkle = 0.85 + 0.15 * Math.sin(this._tMs * (0.001 + p.depth * 0.002) + p.seed * 6.283);
             const breath = 1 + 0.15 * this._breath;
-            const alpha = (p.flashT > 0 ? 0.95 : 0.35 + p.depth * 0.55) * this._fieldAlpha * twinkle * breath;
+            const lift = 1 + waveLift * 0.5;
+            const alpha = (p.flashT > 0 ? 0.95 : 0.35 + p.depth * 0.55) * this._fieldAlpha * twinkle * breath * lift;
             let a = Math.min(1, alpha);
             // §6 layering: fade particles out over foreground pixels.
             const fg = this._foreground;
@@ -532,6 +641,16 @@ export class ParticleLayer {
             cr.moveTo(a.x, a.y);
             cr.lineTo(a.x - a.vx * 30, a.y - a.vy * 30);
             cr.setLineWidth(2);
+            cr.stroke();
+        }
+        // GPU-driven mood accents: occasional short streaks, rate-limited.
+        for (const a of this._eventAccents) {
+            if (this._cellCovered(a.x, a.y)) continue;
+            const [r, g, b] = hslToRgb(a.hue, 0.5, 0.6);
+            cr.setSourceRGBA(r, g, b, 0.5);
+            cr.moveTo(a.x, a.y);
+            cr.lineTo(a.x - a.vx * 20, a.y - a.vy * 20);
+            cr.setLineWidth(1.6);
             cr.stroke();
         }
     }
