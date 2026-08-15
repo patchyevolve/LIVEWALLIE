@@ -111,6 +111,25 @@ export class ParticleLayer {
     private _getPointer: (() => { x: number; y: number } | null) | null =
         null;
 
+    // Obscured-window grid: cellSize cells marked 1 are covered by a window.
+    // Covered particles are neither stepped nor drawn — the field is frozen
+    // and unrendered behind windows of any size.
+    private _covered: {
+        grid: Uint8Array;
+        cols: number;
+        cell: number;
+    } | null = null;
+
+    setCoveredGrid(grid: Uint8Array | null, cols: number, cell: number) {
+        this._covered = grid ? { grid, cols, cell } : null;
+    }
+
+    private _cellCovered(x: number, y: number): boolean {
+        const c = this._covered;
+        if (!c) return false;
+        return c.grid[((y / c.cell) | 0) * c.cols + ((x / c.cell) | 0)] === 1;
+    }
+
     constructor(
         client: SceneClient,
         width: number,
@@ -352,6 +371,8 @@ export class ParticleLayer {
         const ptrR2 = ptrR * ptrR;
 
         for (const p of this._particles) {
+            // Grid-obscured cells: freeze (don't step) hidden particles.
+            if (this._cellCovered(p.x, p.y)) continue;
             const baseSpeed = (6 + p.depth * 34) * speedMul * (1 + surge);
             p.vx = baseSpeed + drift;
             // All velocities are px/s; the single *s below converts to px per
@@ -468,6 +489,8 @@ export class ParticleLayer {
         const lig = clamp(ligBase, 32, 60);
 
         for (const p of this._particles) {
+            // Grid-obscured cells: don't render hidden particles.
+            if (this._cellCovered(p.x, p.y)) continue;
             const hue = (baseHue + (p.seed - 0.5) * 14 + 360) % 360;
             let s = sat;
             let l = lig + (p.seed - 0.5) * 8;
@@ -502,6 +525,7 @@ export class ParticleLayer {
         // Directional accents: 190° cyan (rx/pan_left), 20° coral (tx/pan_right),
         // flat S=50 annotations drawn as motion streaks.
         for (const a of this._accents) {
+            if (this._cellCovered(a.x, a.y)) continue;
             const [r, g, b] = hslToRgb(a.hue, 0.5, 0.55);
             cr.setSourceRGBA(r, g, b, 0.7);
             cr.moveTo(a.x, a.y);

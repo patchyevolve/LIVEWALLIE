@@ -12,7 +12,15 @@ interface MonitorEntry {
     layer: ParticleLayer;
     /** §6 optional foreground mask provider (never paints anything). */
     foreground: WallpaperForeground | null;
+    /** Layer origin/size in global coordinates (orientation-adjusted). */
+    x: number;
+    y: number;
+    w: number;
+    h: number;
 }
+
+/** Obscured-window grid granularity (layer pixels per cell). */
+const GRID_CELL = 48;
 
 function monitorConnector(monitor: any): string {
     try {
@@ -198,7 +206,15 @@ export class MonitorManager {
                 layer.setForegroundMask(foreground.getMask(), w, h);
             }
 
-            this._entries.push({ monitor, layer, foreground });
+            this._entries.push({
+                monitor,
+                layer,
+                foreground,
+                x: actorX,
+                y: actorY,
+                w,
+                h,
+            });
         }
     }
 
@@ -207,8 +223,8 @@ export class MonitorManager {
         return s ? s.get_boolean("pause-fullscreen") : true;
     }
 
-    /** Any visible real window (not desktop/dock, not during overview)
-     *  overlapping this monitor? */
+/** Any visible real window (not desktop/dock, not during overview)
+ *  overlapping this monitor? */
     private _windowObscures(monitor: any): boolean {
         const mX = monitor.x;
         const mY = monitor.y;
@@ -236,6 +252,47 @@ export class MonitorManager {
         return false;
     }
 
+    /** Obscured-window grid in LAYER coordinates (orientation-adjusted):
+     *  cell = 1 where any real window covers it. Windows spanning monitors
+     *  mark cells on both. */
+    private _coveredGrid(
+        layerX: number,
+        layerY: number,
+        layerW: number,
+        layerH: number
+    ): Uint8Array {
+        const cell = GRID_CELL;
+        const cols = Math.ceil(layerW / cell);
+        const rows = Math.ceil(layerH / cell);
+        const grid = new Uint8Array(cols * rows);
+        try {
+            for (const actor of global.get_window_actors()) {
+                const win =
+                    actor.get_meta_window?.() ?? (actor as any).meta_window;
+                if (!win || !win.get_visible()) continue;
+                const type = win.get_window_type();
+                if (type === 11 /* Meta.WindowType.DESKTOP */) continue;
+                if (type === 10 /* Meta.WindowType.DOCK */) continue;
+                const r = win.get_frame_rect();
+                const ix0 = Math.max(r.x, layerX);
+                const iy0 = Math.max(r.y, layerY);
+                const ix1 = Math.min(r.x + r.width, layerX + layerW);
+                const iy1 = Math.min(r.y + r.height, layerY + layerH);
+                if (ix1 <= ix0 || iy1 <= iy0) continue;
+                const gx0 = Math.max(0, Math.floor((ix0 - layerX) / cell));
+                const gy0 = Math.max(0, Math.floor((iy0 - layerY) / cell));
+                const gx1 = Math.min(cols - 1, Math.floor((ix1 - 1 - layerX) / cell));
+                const gy1 = Math.min(rows - 1, Math.floor((iy1 - 1 - layerY) / cell));
+                for (let gy = gy0; gy <= gy1; gy++) {
+                    for (let gx = gx0; gx <= gx1; gx++) {
+                        grid[gy * cols + gx] = 1;
+                    }
+                }
+            }
+        } catch (e) {}
+        return grid;
+    }
+
     private _updatePaused() {
         const pauseFull = this._pauseOnFullscreen();
         const s = this._settings;
@@ -245,11 +302,19 @@ export class MonitorManager {
             const fullscreen = global.display.get_monitor_in_fullscreen(
                 entry.monitor.index
             );
-            const obscured =
-                pauseObscured &&
-                !inOverview &&
-                this._windowObscures(entry.monitor);
-            if ((pauseFull && fullscreen) || obscured) {
+            // Grid-based hiding: while enabled and not browsing the
+            // overview, covered cells freeze+hide particles behind windows
+            // of any size. Fullscreen still pauses the whole layer.
+            let grid: Uint8Array | null = null;
+            if (pauseObscured && !inOverview) {
+                grid = this._coveredGrid(entry.x, entry.y, entry.w, entry.h);
+            }
+            entry.layer.setCoveredGrid(
+                grid,
+                Math.ceil(entry.w / GRID_CELL),
+                GRID_CELL
+            );
+            if (pauseFull && fullscreen) {
                 entry.layer.pause();
             } else {
                 entry.layer.resume();

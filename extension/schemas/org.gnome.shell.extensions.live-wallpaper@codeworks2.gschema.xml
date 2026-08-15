@@ -11,7 +11,7 @@
     </key>
     <key name="pause-obscured" type="b">
       <default>true</default>
-      <summary>Pause the animation on a screen whenever any window covers part of it (not just fullscreen). Keeps the particle field still behind windows.</summary>
+      <summary>Grid-based hiding: the field freezes and stops rendering behind windows of any size (48px cells); only visible areas animate.</summary>
     </key>
     <key name="idle-speed" type="d">
       <default>0.7</default>

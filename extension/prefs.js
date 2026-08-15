@@ -184,7 +184,7 @@ export default class LiveWallpaperPrefs {
             general,
             settings,
             "Pause behind windows",
-            "Stop the animation on a screen whenever any window covers part of it — the field stays still behind windows, not just in fullscreen",
+            "Grid-based hiding: the field freezes and stops rendering behind windows of any size — only visible areas animate",
             "pause-obscured"
         );
         page.add(general);
