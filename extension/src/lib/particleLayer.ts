@@ -34,6 +34,7 @@ interface StreakAccent {
     vx: number;
     vy: number;
     hue: number; // 190 (rx/pan_left) | 20 (tx/pan_right)
+    life: number; // 1 → 0; mood accents fade and vanish (never persist)
 }
 
 function clamp(v: number, lo: number, hi: number) {
@@ -425,6 +426,7 @@ export class ParticleLayer {
                     vx: (Math.random() < 0.5 ? -1 : 1) * (40 + Math.random() * 60),
                     vy: 0,
                     hue: Math.random() < 0.5 ? 190 : 20,
+                    life: 1,
                 });
             }
         }
@@ -519,6 +521,7 @@ export class ParticleLayer {
                 vx: 0,
                 vy: 0,
                 hue: this._accents.length % 2 === 0 ? 190 : 20,
+                life: 1,
             });
         }
         while (this._accents.length > target) this._accents.pop();
@@ -535,8 +538,15 @@ export class ParticleLayer {
             if (a.y < -30) a.y = this._height + 20;
             if (a.y > this._height + 30) a.y = -20;
         }
-        // Mood event accents (GPU-driven): constant-velocity streaks.
-        for (const a of this._eventAccents) {
+        // Mood event accents (GPU-driven): constant-velocity sparks with a
+        // ~1.5s life — they fade and vanish, never persist or accumulate.
+        for (let i = this._eventAccents.length - 1; i >= 0; i--) {
+            const a = this._eventAccents[i];
+            a.life -= dt / 1500;
+            if (a.life <= 0) {
+                this._eventAccents.splice(i, 1);
+                continue;
+            }
             a.x += a.vx * dt;
             if (a.x < -30) a.x = this._width + 20;
             if (a.x > this._width + 30) a.x = -20;
@@ -663,14 +673,16 @@ export class ParticleLayer {
             cr.setLineWidth(2);
             cr.stroke();
         }
-        // GPU-driven mood accents: occasional short streaks, rate-limited.
+        // GPU-driven mood accents: occasional short sparks, rate-limited,
+        // fading and shrinking over their ~1.5s life.
         for (const a of this._eventAccents) {
             if (this._cellCovered(a.x, a.y)) continue;
             const [r, g, b] = hslToRgb(a.hue, 0.5, 0.6);
-            cr.setSourceRGBA(r, g, b, 0.5);
+            const life = Math.max(0, a.life);
+            cr.setSourceRGBA(r, g, b, 0.45 * life);
             cr.moveTo(a.x, a.y);
-            cr.lineTo(a.x - a.vx * 20, a.y - a.vy * 20);
-            cr.setLineWidth(1.6);
+            cr.lineTo(a.x - a.vx * 20 * life, a.y - a.vy * 20 * life);
+            cr.setLineWidth(1.4);
             cr.stroke();
         }
     }
