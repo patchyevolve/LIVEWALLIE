@@ -279,13 +279,10 @@ export class ParticleLayer {
             (accentDriftTarget - this._accentDrift) * (1 - Math.exp(-dt / DRIFT_TAU_MS));
         this._accentActive = accentActive;
 
-        // Particle budget: max(100, round(600 * (1 - 0.5*cpu))), recomputed
-        // from the latest telemetry; applies in both modes.
-        const cpu = state.system?.cpu ?? 0;
-        const targetCount = Math.max(
-            MIN_PARTICLES,
-            Math.round(MAX_PARTICLES * (1 - 0.5 * cpu))
-        );
+        // Particle budget: fixed 600. The old CPU->count coupling (600 * (1-0.5*cpu))
+        // caused instant mass spawn/despawn pops — the tide/wave/hue mood
+        // carries CPU representation now.
+        const targetCount = MAX_PARTICLES;
 
         // Pulse events: flash + a directional speed surge along the drift axis —
 // a "warp pulse" that never displaces particles out of the field. No radial
@@ -411,8 +408,8 @@ export class ParticleLayer {
         //   - Embers: telemetry-independent rare clusters that drift through
         //     diagonally — life even on a fully idle machine.
         if (inSystem && this._mood.consumeTideWave(state.system, nowMs)) {
-            this._waveX = -120;
-            this._waveSpeed = w / 2600; // ~2.6s to cross the field
+            this._waveX = -160;
+            this._waveSpeed = w / 3500; // ~3.5s to cross the field
         }
         if (this._waveX >= 0) {
             this._waveX += this._waveSpeed * dt;
@@ -435,7 +432,12 @@ export class ParticleLayer {
             this._emberNextMs = 8000 + Math.random() * 12000;
             const cx = w * (0.1 + Math.random() * 0.8);
             const cy = h * (0.1 + Math.random() * 0.8);
-            const ang = Math.random() * 2 * Math.PI;
+            // Near-horizontal drift (within ±34° of the x axis) so embers
+            // always read as something crossing the field — never as a
+            // random group going up/down.
+            const ang =
+                (Math.random() < 0.5 ? 0 : Math.PI) +
+                (Math.random() - 0.5) * 1.2;
             const spd = 80 + Math.random() * 60;
             const evx = Math.cos(ang) * spd;
             const evy = Math.sin(ang) * spd;
@@ -635,7 +637,7 @@ export class ParticleLayer {
             let waveLift = 0;
             if (this._waveX >= 0) {
                 const wd = Math.abs(p.x - this._waveX);
-                if (wd < 130) waveLift = 1 - wd / 130;
+                if (wd < 170) waveLift = 1 - wd / 170;
             }
             // Wandering embers: warm, bright sparks with a short trail.
             const ember = p.emberT > 0;
@@ -649,7 +651,7 @@ export class ParticleLayer {
             // mode-driven ambient brightness — all uniform, no displacement.
             const twinkle = 0.85 + 0.15 * Math.sin(this._tMs * (0.001 + p.depth * 0.002) + p.seed * 6.283);
             const breath = 1 + 0.15 * this._breath;
-            const lift = 1 + waveLift * 0.65;
+            const lift = 1 + waveLift * 0.9;
             const alpha = (p.flashT > 0 ? 0.95 : 0.35 + p.depth * 0.55) * this._fieldAlpha * twinkle * breath * lift;
             let a = Math.min(1, alpha);
             // §6 layering: fade particles out over foreground pixels.
