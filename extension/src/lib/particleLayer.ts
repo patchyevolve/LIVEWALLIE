@@ -412,11 +412,11 @@ export class ParticleLayer {
         //     diagonally — life even on a fully idle machine.
         if (inSystem && this._mood.consumeTideWave(state.system, nowMs)) {
             log(`[live-wallpaper] wave fired on layer ${this._width}x${this._height}`);
-            this._waveX = -160;
+            this._waveX = -240;
             this._waveSpeed = w / 4500; // ~4.5s to cross the field
             this._waveFlashMs = 500;
         }
-        if (this._waveX >= 0) {
+        if (this._waveX > -240) {
             this._waveX += this._waveSpeed * dt;
             if (this._waveX > w + 120) this._waveX = -1;
         }
@@ -650,7 +650,7 @@ export class ParticleLayer {
             // CPU load rising, not sustained. Lifts lightness too, so it
             // shows against busy dark wallpapers.
             let waveLift = 0;
-            if (this._waveX >= 0) {
+            if (this._waveX > -240) {
                 const wd = Math.abs(p.x - this._waveX);
                 if (wd < 240) waveLift = 1 - wd / 240;
             }
@@ -721,7 +721,7 @@ export class ParticleLayer {
         }
         // Tide wave overlay: a soft warm band sweeping across, drawn on top
         // so it reads as a light sweep even against busy wallpapers.
-        if (this._waveX >= 0) {
+        if (this._waveX > -240) {
             const nowMs = Date.now();
             if (nowMs - this._waveLogMs > 200) {
                 this._waveLogMs = nowMs;
