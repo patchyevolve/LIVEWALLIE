@@ -152,6 +152,9 @@ export class SystemMood {
         if (!rising) return false;
         if (nowMs - this._lastWaveMs < WAVE_MIN_GAP_MS) return false;
         this._lastWaveMs = nowMs;
+        console.log(
+            `[live-wallpaper] mood: tide wave (cpu ${(sys.cpu * 100).toFixed(0)}%, mood ${(this._cpu * 100).toFixed(0)}%)`
+        );
         return true;
     }
 
@@ -163,6 +166,9 @@ export class SystemMood {
         this._accentProb = 0;
         if (nowMs - this._lastAccentMs < ACCENT_MIN_GAP_MS) return false;
         this._lastAccentMs = nowMs;
+        console.log(
+            `[live-wallpaper] mood: gpu spark (gpu ${(this._gpu * 100).toFixed(0)}%)`
+        );
         return true;
     }
 }

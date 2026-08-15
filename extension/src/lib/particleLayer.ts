@@ -604,8 +604,13 @@ export class ParticleLayer {
                 const temp = this._mood.getTemp();
                 if (temp > 0.4) {
                     baseHue = lerpHue(baseHue, 35, clamp((temp - 0.4) / 0.6, 0, 1) * 0.4);
+                    // Warm accents don't change hue much — lean sat/lightness
+                    // so heat still visibly warms the field.
+                    ligBase += (temp - 0.4) * 25;
+                    satBase += (temp - 0.4) * 12;
                 } else {
                     baseHue = lerpHue(baseHue, 255, clamp((0.4 - temp) / 0.4, 0, 1) * 0.4);
+                    ligBase += (temp - 0.4) * 25;
                 }
                 baseHue = (baseHue + wob + 360) % 360;
             }
@@ -630,7 +635,7 @@ export class ParticleLayer {
             let waveLift = 0;
             if (this._waveX >= 0) {
                 const wd = Math.abs(p.x - this._waveX);
-                if (wd < 100) waveLift = 1 - wd / 100;
+                if (wd < 130) waveLift = 1 - wd / 130;
             }
             // Wandering embers: warm, bright sparks with a short trail.
             const ember = p.emberT > 0;
@@ -644,7 +649,7 @@ export class ParticleLayer {
             // mode-driven ambient brightness — all uniform, no displacement.
             const twinkle = 0.85 + 0.15 * Math.sin(this._tMs * (0.001 + p.depth * 0.002) + p.seed * 6.283);
             const breath = 1 + 0.15 * this._breath;
-            const lift = 1 + waveLift * 0.5;
+            const lift = 1 + waveLift * 0.65;
             const alpha = (p.flashT > 0 ? 0.95 : 0.35 + p.depth * 0.55) * this._fieldAlpha * twinkle * breath * lift;
             let a = Math.min(1, alpha);
             // §6 layering: fade particles out over foreground pixels.
