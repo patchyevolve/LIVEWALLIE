@@ -409,7 +409,7 @@ export class ParticleLayer {
         //     diagonally — life even on a fully idle machine.
         if (inSystem && this._mood.consumeTideWave(state.system, nowMs)) {
             this._waveX = -160;
-            this._waveSpeed = w / 3500; // ~3.5s to cross the field
+            this._waveSpeed = w / 4500; // ~4.5s to cross the field
         }
         if (this._waveX >= 0) {
             this._waveX += this._waveSpeed * dt;
@@ -638,9 +638,9 @@ export class ParticleLayer {
             let waveLift = 0;
             if (this._waveX >= 0) {
                 const wd = Math.abs(p.x - this._waveX);
-                if (wd < 170) waveLift = 1 - wd / 170;
+                if (wd < 240) waveLift = 1 - wd / 240;
             }
-            if (waveLift > 0) l = Math.min(95, l + waveLift * 16);
+            if (waveLift > 0) l = Math.min(95, l + waveLift * 20);
             // Wandering embers: fixed warm amber, big and bright — they must
             // pop against the cool field, not blend into it.
             const ember = p.emberT > 0;
@@ -654,7 +654,7 @@ export class ParticleLayer {
             // mode-driven ambient brightness — all uniform, no displacement.
             const twinkle = 0.85 + 0.15 * Math.sin(this._tMs * (0.001 + p.depth * 0.002) + p.seed * 6.283);
             const breath = 1 + 0.15 * this._breath;
-            const lift = 1 + waveLift * 0.9;
+            const lift = 1 + waveLift * 1.1;
             const alpha = (p.flashT > 0 ? 0.95 : 0.35 + p.depth * 0.55) * this._fieldAlpha * twinkle * breath * lift;
             let a = Math.min(1, alpha);
             // §6 layering: fade particles out over foreground pixels.

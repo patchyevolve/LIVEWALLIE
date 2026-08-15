@@ -34,10 +34,10 @@ const TAU_TEMP_MS = 25000;
 const TAU_CPU_MS = 6000;
 const TAU_BATT_MS = 120000;
 const TAU_GPU_MS = 10000;
-const WAVE_MIN_GAP_MS = 20000;
+const WAVE_MIN_GAP_MS = 12000;
 const ACCENT_MIN_GAP_MS = 12000;
-const ACCENT_MEAN_MS = 30000;
-const WAVE_RISE = 0.12;
+const ACCENT_MEAN_MS = 20000;
+const WAVE_RISE = 0.06;
 
 /** Hue waypoints on normalized temperature (hardware-independent 0..1):
  *  cool indigo → cyan → violet → amber → warm. */
