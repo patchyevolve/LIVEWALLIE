@@ -62,7 +62,9 @@ function ease(dt: number, tau: number): number {
 
 export class SystemMood {
     private _cpu = 0;
+    private _cpuKnown = false;
     private _temp = 0;
+    private _tempKnown = false;
     private _batt = 0.5;
     private _battKnown = false;
     private _charging = false;
@@ -87,11 +89,23 @@ export class SystemMood {
         const kC = ease(dt, TAU_CPU_MS);
         const kB = ease(dt, TAU_BATT_MS);
         const kG = ease(dt, TAU_GPU_MS);
+        // Warm start: seed from the first sample instead of easing from 0,
+        // so a fresh login/reconnect never fires a spurious wave.
         if (sys.temperature !== undefined && sys.temperature > 0.001) {
-            this._temp += (sys.temperature - this._temp) * kT;
+            if (!this._tempKnown) {
+                this._temp = sys.temperature;
+                this._tempKnown = true;
+            } else {
+                this._temp += (sys.temperature - this._temp) * kT;
+            }
         }
         if (sys.cpu !== undefined) {
-            this._cpu += (sys.cpu - this._cpu) * kC;
+            if (!this._cpuKnown) {
+                this._cpu = sys.cpu;
+                this._cpuKnown = true;
+            } else {
+                this._cpu += (sys.cpu - this._cpu) * kC;
+            }
         }
         if (sys.battery !== undefined && sys.battery !== null) {
             this._battKnown = true;
