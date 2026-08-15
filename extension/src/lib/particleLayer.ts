@@ -681,14 +681,15 @@ export class ParticleLayer {
             cr.stroke();
         }
         // GPU-driven mood accents: occasional short sparks, rate-limited,
-        // fading and shrinking over their ~1.5s life.
+        // fading and shrinking over their ~1.5s life. Trail = 0.2s of
+        // travel (vx is px/s — multiplying by 20 drew screen-length lines).
         for (const a of this._eventAccents) {
             if (this._cellCovered(a.x, a.y)) continue;
             const [r, g, b] = hslToRgb(a.hue, 0.5, 0.6);
             const life = Math.max(0, a.life);
             cr.setSourceRGBA(r, g, b, 0.45 * life);
             cr.moveTo(a.x, a.y);
-            cr.lineTo(a.x - a.vx * 20 * life, a.y - a.vy * 20 * life);
+            cr.lineTo(a.x - a.vx * 0.2 * life, a.y - a.vy * 0.2 * life);
             cr.setLineWidth(1.4);
             cr.stroke();
         }
