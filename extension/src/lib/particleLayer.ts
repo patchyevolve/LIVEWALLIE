@@ -103,6 +103,8 @@ export class ParticleLayer {
     private _mood = new SystemMood(Date.now());
     private _waveX = -1; // traveling brightness wave position, -1 = inactive
     private _waveSpeed = 0;
+    private _waveFlashMs = 0;
+    private _waveLogMs = 0;
     private _emberNextMs = 8000 + Math.random() * 12000; // first ember soon-ish
     private _eventAccents: StreakAccent[] = [];
 
@@ -410,11 +412,13 @@ export class ParticleLayer {
         if (inSystem && this._mood.consumeTideWave(state.system, nowMs)) {
             this._waveX = -160;
             this._waveSpeed = w / 4500; // ~4.5s to cross the field
+            this._waveFlashMs = 500;
         }
         if (this._waveX >= 0) {
             this._waveX += this._waveSpeed * dt;
             if (this._waveX > w + 120) this._waveX = -1;
         }
+        if (this._waveFlashMs > 0) this._waveFlashMs = Math.max(0, this._waveFlashMs - dt);
         if (inSystem && this._mood.consumeAccentEvent(dt, nowMs)) {
             if (this._eventAccents.length < 4) {
                 this._eventAccents.push({
@@ -691,6 +695,7 @@ export class ParticleLayer {
         // fading over ~1.5s. The streak is 0.5s of travel (vx is px/s).
         for (const a of this._eventAccents) {
             if (this._cellCovered(a.x, a.y)) continue;
+            log(`[live-wallpaper] draw: spark at (${Math.round(a.x)},${Math.round(a.y)}) life=${a.life.toFixed(2)}`);
             const [r, g, b] = hslToRgb(a.hue, 0.55, 0.65);
             const life = Math.max(0, a.life);
             cr.setSourceRGBA(r, g, b, 0.28 * life);
@@ -708,6 +713,11 @@ export class ParticleLayer {
         // Tide wave overlay: a soft warm band sweeping across, drawn on top
         // so it reads as a light sweep even against busy wallpapers.
         if (this._waveX >= 0) {
+            const nowMs = Date.now();
+            if (nowMs - this._waveLogMs > 200) {
+                this._waveLogMs = nowMs;
+                log(`[live-wallpaper] draw: wave band at x=${Math.round(this._waveX)}`);
+            }
             const x0 = this._waveX - 240;
             const x1 = this._waveX + 240;
             const grad = cr.createLinearGradient(x0, 0, x1, 0);
@@ -716,6 +726,13 @@ export class ParticleLayer {
             grad.addColorStop(1, "rgba(255, 235, 200, 0)");
             cr.setSource(grad);
             cr.rectangle(x0, 0, 480, this._height);
+            cr.fill();
+        }
+        // DEBUG: full-screen warm flash on wave start — proves the draw path.
+        if (this._waveFlashMs > 0) {
+            const a = 0.35 * (this._waveFlashMs / 500);
+            cr.setSourceRGBA(1, 0.9, 0.75, a);
+            cr.rectangle(0, 0, this._width, this._height);
             cr.fill();
         }
     }
