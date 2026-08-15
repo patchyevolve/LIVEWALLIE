@@ -52,6 +52,12 @@ function hueArc(t: number): number {
     return (300 + (375 - 300) * ((t - 0.5) * 2)) % 360;
 }
 
+/** Shortest-path hue interpolation (handles the 340→25 wrap). */
+function lerpHue(a: number, b: number, t: number): number {
+    let d = ((b - a + 540) % 360) - 180;
+    return (a + d * t + 360) % 360;
+}
+
 function hslToRgb(h: number, s: number, l: number): [number, number, number] {
     const c = (1 - Math.abs(2 * l - 1)) * s;
     const hp = h / 60;
@@ -573,12 +579,26 @@ export class ParticleLayer {
                 ligBase = 25 + accent.lig * 0.4 + 30 * this._intensity;
             }
         }
-        // System mode: the temperature mood owns the hue (slow, τ≈25s) —
-        // cool idle = indigo/cyan, load = amber. A tiny ±4° wobble keeps it
-        // alive without ever twitching.
+        // System mode: temperature owns the hue when the user is on the default
+        // "arc" palette (cool idle = indigo/cyan, load = amber). With an
+        // explicit palette (fixed/wallpaper accent) the chosen hue stays the
+        // base — temperature only leans it toward amber (hot) or indigo
+        // (cool), at most 40% of the way, so the user's color still rules.
+        // A tiny ±4° wobble keeps it alive without ever twitching.
         const inSystem = state.mode === "system";
         if (inSystem) {
-            baseHue = (this._mood.getHue() + 4 * Math.sin(this._tMs * 0.0003) + 360) % 360;
+            const wob = 4 * Math.sin(this._tMs * 0.0003);
+            if (mode === "arc") {
+                baseHue = (this._mood.getHue() + wob + 360) % 360;
+            } else {
+                const temp = this._mood.getTemp();
+                if (temp > 0.4) {
+                    baseHue = lerpHue(baseHue, 35, clamp((temp - 0.4) / 0.6, 0, 1) * 0.4);
+                } else {
+                    baseHue = lerpHue(baseHue, 255, clamp((0.4 - temp) / 0.4, 0, 1) * 0.4);
+                }
+                baseHue = (baseHue + wob + 360) % 360;
+            }
         }
         const sat = clamp(satBase, 40, 90);
         const lig = clamp(ligBase, 32, 60);

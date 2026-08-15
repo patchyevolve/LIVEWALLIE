@@ -121,6 +121,11 @@ export class SystemMood {
         return TEMP_HUE[TEMP_HUE.length - 1][1];
     }
 
+    /** Smoothed normalized temperature (0..1), for palette-relative leans. */
+    getTemp(): number {
+        return this._temp;
+    }
+
     /** Battery → ambient brightness multiplier (0.70..1.03). Desktop: 1.0. */
     getBrightness(): number {
         if (!this._battKnown) return 1;
