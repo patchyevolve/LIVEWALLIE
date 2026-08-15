@@ -1,3 +1,5 @@
+> Historical design document for the Live Wallpaper extension. See [`README.md`](../README.md) for current installation, usage and configuration.
+
 # Live System Wallpaper — Design Document
 **Target platform:** GNOME 50 (Wayland-only — GNOME Shell 50 removed X11 support entirely, so this doc doesn't consider an X11 fallback)
 

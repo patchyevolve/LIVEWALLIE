@@ -5,6 +5,6 @@
   "main": "extension.js",
   "settings-schema": "org.gnome.shell.extensions.live-wallpaper@codeworks2",
   "shell-version": ["50"],
-  "version": 2,
-  "url": "https://github.com/codeworks2/live-wallpaper"
+  "version": 3,
+  "url": "https://github.com/patchyevolve/LIVEWALLIE"
 }

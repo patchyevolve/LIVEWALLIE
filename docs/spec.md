@@ -1,3 +1,5 @@
+> Historical implementation contract for the Live Wallpaper sampler/extension. See [`README.md`](../README.md) for current installation, usage and configuration.
+
 # Live System Wallpaper — Agent Implementation Contract
 **Companion to:** `gnome-live-wallpaper-design-doc.md` (read that first for rationale — this document is for implementation, not motivation)
 
