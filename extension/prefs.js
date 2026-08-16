@@ -245,28 +245,31 @@ export default class LiveWallpaperPrefs {
             "bass-gravity",
             "beat-surge",
         ];
+        const storedPreset = settings.get_string("scene-preset");
+        const knownPreset = SCENE_KEYS.indexOf(storedPreset) >= 0;
+        // "Custom" appears when the stored preset isn't one of the four
+        // scenes (e.g. after a settings reset): the row must never silently
+        // display a scene that isn't actually applied — and selecting a
+        // scene must never be triggered by merely opening the window.
+        const SCENE_LABELS = ["Deep space", "Aurora", "Ember", "Rain", "Custom"];
         const sceneRow = new Adw.ComboRow({
             title: "Scene",
-            model: Gtk.StringList.new([
-                "Deep space",
-                "Aurora",
-                "Ember",
-                "Rain",
-            ]),
-            selected: Math.max(
-                0,
-                SCENE_KEYS.indexOf(settings.get_string("scene-preset"))
-            ),
+            model: Gtk.StringList.new(SCENE_LABELS),
+            selected: knownPreset
+                ? SCENE_KEYS.indexOf(storedPreset)
+                : SCENE_LABELS.length - 1,
         });
         // The row re-emits notify::selected when it is realized (after the
         // handler is connected), which would re-apply the stored preset over
         // the user's manual tweaks on every panel open. Only apply when the
         // selection actually differs from the already-stored preset.
-        let lastApplied = settings.get_string("scene-preset");
+        let lastApplied = storedPreset;
         sceneRow.connect("notify::selected", () => {
-            const preset = SCENE_KEYS[sceneRow.selected];
+            const idx = sceneRow.selected;
+            const preset = idx < SCENE_KEYS.length ? SCENE_KEYS[idx] : "custom";
             if (preset === lastApplied) return;
             lastApplied = preset;
+            if (preset === "custom") return;
             const bundle = SCENES[preset];
             const missing = PRESET_KEYS.filter(
                 (k) => !bundle.some(([key]) => key === k)
