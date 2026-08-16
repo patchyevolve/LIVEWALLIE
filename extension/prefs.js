@@ -70,7 +70,7 @@ function addScale(group, settings, title, key, lo, hi, step) {
     });
     scale.set_range(lo, hi);
     scale.set_increments(step, 0);
-    scale.set_value(1);
+    scale.set_value(settings ? settings.get_double(key) : 1);
     row.add_suffix(scale);
     group.add(row);
     if (settings) {
@@ -442,7 +442,7 @@ export default class LiveWallpaperPrefs {
             });
             shiftScale.set_range(-180, 180);
             shiftScale.set_increments(5, 0);
-            shiftScale.set_value(0);
+            shiftScale.set_value(settings.get_double("accent-shift"));
             accentRow.add_suffix(shiftScale);
             colors.add(accentRow);
 
