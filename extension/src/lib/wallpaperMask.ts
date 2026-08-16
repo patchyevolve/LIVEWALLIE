@@ -314,6 +314,80 @@ export function coverCropPixbuf(
 
 export type MaskMode = "auto" | "luminance" | "edges";
 
+/** Edge analysis cap: the flood fill is only stable over a range of
+ *  analysis scales. Too small and the barrier rings breach (foreground
+ *  collapses to a few percent); too large and busy textures overgrow
+ *  the barriers (foreground becomes the whole frame). Both failure
+ *  modes are gone in the ~512-960px range across every wallpaper we
+ *  have tested, so edges are always analyzed at ≤1024px and the mask is
+ *  bilinearly upscaled to the layer size. */
+const EDGE_ANALYSIS_MAX = 1024;
+
+/** Cover-fit crop of src at w×h, then a luminance sampler over it. */
+function cropLuminance(
+    src: GdkPixbuf.Pixbuf,
+    w: number,
+    h: number
+): (x: number, y: number) => number {
+    const crop = coverCropPixbuf(src, w, h);
+    const stride = crop.get_rowstride();
+    const n = crop.get_n_channels();
+    const px = crop.get_pixels();
+    return (x: number, y: number) => {
+        const i = y * stride + x * n;
+        return (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / 255;
+    };
+}
+
+/** Bilinear upscale of a mask from sw×sh to dw×dh. */
+function upscaleMask(
+    alpha: number[],
+    sw: number,
+    sh: number,
+    dw: number,
+    dh: number
+): number[] {
+    if (sw === dw && sh === dh) return alpha;
+    const out = new Array<number>(dw * dh);
+    const fx = (sw - 1) / (dw - 1);
+    const fy = (sh - 1) / (dh - 1);
+    for (let y = 0; y < dh; y++) {
+        const sy = y * fy;
+        const y0 = Math.floor(sy);
+        const y1 = Math.min(sh - 1, y0 + 1);
+        const wy = sy - y0;
+        for (let x = 0; x < dw; x++) {
+            const sx = x * fx;
+            const x0 = Math.floor(sx);
+            const x1 = Math.min(sw - 1, x0 + 1);
+            const wx = sx - x0;
+            const a00 = alpha[y0 * sw + x0];
+            const a10 = alpha[y0 * sw + x1];
+            const a01 = alpha[y1 * sw + x0];
+            const a11 = alpha[y1 * sw + x1];
+            out[y * dw + x] =
+                (a00 * (1 - wx) + a10 * wx) * (1 - wy) +
+                (a01 * (1 - wx) + a11 * wx) * wy;
+        }
+    }
+    return out;
+}
+
+/** Edge-silhouette mask at the layer geometry, analyzed at a capped
+ *  scale (see EDGE_ANALYSIS_MAX) so the flood fill never sees the
+ *  texture-overgrowth or ring-breach failure modes. */
+function buildEdgeMaskScaled(
+    src: GdkPixbuf.Pixbuf,
+    w: number,
+    h: number
+): CutoutResult | null {
+    const EW = Math.min(w, EDGE_ANALYSIS_MAX);
+    const EH = Math.max(1, Math.round((EW * h) / w));
+    const raw = buildEdgeMask(EW, EH, cropLuminance(src, EW, EH));
+    if (!raw) return null;
+    return { alpha: upscaleMask(raw.alpha, EW, EH, w, h), coverage: raw.coverage };
+}
+
 /** Foreground mask for a display of w×h logical pixels, sampled from the
  *  source wallpaper exactly as GNOME paints it: cover-fit (scale to the
  *  larger axis, center-crop). The returned alpha array is indexed directly
@@ -329,15 +403,7 @@ export function computeCoverMask(
     invert = false,
     mode: MaskMode = "auto"
 ): CutoutResult | null {
-    const crop = coverCropPixbuf(src, w, h);
-
-    const stride = crop.get_rowstride();
-    const n = crop.get_n_channels();
-    const px = crop.get_pixels();
-    const lum = (x: number, y: number) => {
-        const i = y * stride + x * n;
-        return (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / 255;
-    };
+    const lum = cropLuminance(src, w, h);
     let raw: CutoutResult | null;
     if (invert && mode !== "edges") {
         // Inverted luminance reading: count the BRIGHT pixels as foreground
@@ -354,9 +420,9 @@ export function computeCoverMask(
     if (mode === "luminance") {
         raw = buildCutoutMask(w, h, lum, threshold);
     } else if (mode === "edges") {
-        raw = buildEdgeMask(w, h, lum);
+        raw = buildEdgeMaskScaled(src, w, h);
     } else {
-        raw = buildCutoutMask(w, h, lum, threshold) ?? buildEdgeMask(w, h, lum);
+        raw = buildCutoutMask(w, h, lum, threshold) ?? buildEdgeMaskScaled(src, w, h);
     }
     return raw && invert ? invertCutout(raw) : raw;
 }
