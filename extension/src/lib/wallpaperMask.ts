@@ -138,33 +138,30 @@ export function buildEdgeMask(
     }
     const barrierThr = Math.max(otsu, 6) / 255;
     const barrier = new Uint8Array(w * h);
+    const dilated = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
             if (grad[y * w + x] > barrierThr) barrier[y * w + x] = 1;
         }
     }
-    // Dilate the barrier with horizontal then vertical span sweeps (radius
-    // 3). A single 1px dilation left gaps in edge rings once the wallpaper
-    // is downscaled to screen size — the flood fill leaked through them and
-    // the foreground collapsed to a few percent. Span sweeps are O(w·h)
-    // and cheap on the sparse barrier.
-    const DILATE = 3;
-    const dilated = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) {
-        const row = y * w;
+        const y0 = Math.max(0, y - 1);
+        const y1 = Math.min(h - 1, y + 1);
         for (let x = 0; x < w; x++) {
-            if (!barrier[row + x]) continue;
-            const x0 = Math.max(0, x - DILATE);
-            const x1 = Math.min(w - 1, x + DILATE);
-            for (let k = x0; k <= x1; k++) dilated[row + k] = 1;
-        }
-    }
-    for (let x = 0; x < w; x++) {
-        for (let y = 0; y < h; y++) {
-            if (!dilated[y * w + x]) continue;
-            const y0 = Math.max(0, y - DILATE);
-            const y1 = Math.min(h - 1, y + DILATE);
-            for (let k = y0; k <= y1; k++) dilated[k * w + x] = 1;
+            if (barrier[y * w + x]) {
+                dilated[y * w + x] = 1;
+                continue;
+            }
+            const x0 = Math.max(0, x - 1);
+            const x1 = Math.min(w - 1, x + 1);
+            if (
+                barrier[y0 * w + x0] || barrier[y0 * w + x] ||
+                barrier[y0 * w + x1] || barrier[y * w + x0] ||
+                barrier[y * w + x1] || barrier[y1 * w + x0] ||
+                barrier[y1 * w + x] || barrier[y1 * w + x1]
+            ) {
+                dilated[y * w + x] = 1;
+            }
         }
     }
     const reach = new Uint8Array(w * h);
@@ -314,14 +311,50 @@ export function coverCropPixbuf(
 
 export type MaskMode = "auto" | "luminance" | "edges";
 
-/** Edge analysis cap: the flood fill is only stable over a range of
- *  analysis scales. Too small and the barrier rings breach (foreground
- *  collapses to a few percent); too large and busy textures overgrow
- *  the barriers (foreground becomes the whole frame). Both failure
- *  modes are gone in the ~512-960px range across every wallpaper we
- *  have tested, so edges are always analyzed at ≤1024px and the mask is
- *  bilinearly upscaled to the layer size. */
-const EDGE_ANALYSIS_MAX = 1024;
+/** Edge analysis fallback cap: the flood fill is only stable over a range
+ *  of analysis scales. Too small and the barrier rings breach (foreground
+ *  collapses to a few percent); too large and busy textures overgrow the
+ *  barriers (foreground becomes the whole frame). Both failure modes are
+ *  gone in the ~512-960px range across every wallpaper we have tested, so
+ *  a rejected or suspicious full-scale reading is retried at ≤640px and
+ *  the mask is bilinearly upscaled to the layer size. */
+const EDGE_FALLBACK_MAX = 640;
+// A full-scale reading below this is suspicious: it usually means the
+// barrier ring breached and the flood escaped (the few percent of
+// "foreground" left behind is a fragment, not a subject). Real small
+// foregrounds also land here, so the fallback only wins when it covers
+// MORE area — a breached full-scale reading never legitimately does.
+const BREACH_SUSPECT = 0.05;
+
+function edgeMaskFallback(
+    src: GdkPixbuf.Pixbuf,
+    w: number,
+    h: number
+): CutoutResult | null {
+    const EW = Math.min(w, EDGE_FALLBACK_MAX);
+    const EH = Math.max(1, Math.round((EW * h) / w));
+    const fb = buildEdgeMask(EW, EH, cropLuminance(src, EW, EH));
+    if (!fb) return null;
+    return { alpha: upscaleMask(fb.alpha, EW, EH, w, h), coverage: fb.coverage };
+}
+
+/** Edge-silhouette mask at the layer geometry. Analyzed at the full layer
+ *  scale first so every wallpaper that already worked keeps producing the
+ *  exact same mask. Only when the full-scale reading is rejected (ring
+ *  breach or texture overgrowth) or is breach-suspicious do we retry at a
+ *  smaller stable scale and bilinearly upscale. */
+function buildEdgeMaskScaled(
+    src: GdkPixbuf.Pixbuf,
+    w: number,
+    h: number
+): CutoutResult | null {
+    const raw = buildEdgeMask(w, h, cropLuminance(src, w, h));
+    if (!raw) return edgeMaskFallback(src, w, h);
+    if (raw.coverage >= BREACH_SUSPECT) return raw;
+    const fb = edgeMaskFallback(src, w, h);
+    if (fb && fb.coverage > raw.coverage) return fb;
+    return raw;
+}
 
 /** Cover-fit crop of src at w×h, then a luminance sampler over it. */
 function cropLuminance(
@@ -373,21 +406,6 @@ function upscaleMask(
     return out;
 }
 
-/** Edge-silhouette mask at the layer geometry, analyzed at a capped
- *  scale (see EDGE_ANALYSIS_MAX) so the flood fill never sees the
- *  texture-overgrowth or ring-breach failure modes. */
-function buildEdgeMaskScaled(
-    src: GdkPixbuf.Pixbuf,
-    w: number,
-    h: number
-): CutoutResult | null {
-    const EW = Math.min(w, EDGE_ANALYSIS_MAX);
-    const EH = Math.max(1, Math.round((EW * h) / w));
-    const raw = buildEdgeMask(EW, EH, cropLuminance(src, EW, EH));
-    if (!raw) return null;
-    return { alpha: upscaleMask(raw.alpha, EW, EH, w, h), coverage: raw.coverage };
-}
-
 /** Foreground mask for a display of w×h logical pixels, sampled from the
  *  source wallpaper exactly as GNOME paints it: cover-fit (scale to the
  *  larger axis, center-crop). The returned alpha array is indexed directly
@@ -406,16 +424,14 @@ export function computeCoverMask(
     const lum = cropLuminance(src, w, h);
     let raw: CutoutResult | null;
     if (invert && mode !== "edges") {
-        // Inverted luminance reading: count the BRIGHT pixels as foreground
-        // and apply the coverage sanity to that fraction. This must run
-        // directly — computing the normal reading first is useless on a
-        // dark wallpaper, where it is rejected (>95% dark) and the inverted
-        // reading (a small bright object) never gets a chance.
-        raw = buildCutoutMask(w, h, (x, y) => 1 - lum(x, y), threshold);
-        if (!raw) return null;
-        const alpha = new Array<number>(raw.alpha.length);
-        for (let i = 0; i < alpha.length; i++) alpha[i] = 1 - raw.alpha[i];
-        return { alpha, coverage: raw.coverage };
+        // Inverted luminance reading: the BRIGHT side of the same threshold
+        // becomes the foreground. The threshold must be mirrored too —
+        // thresholding (1 - lum) at `threshold` would mean lum > 1-threshold
+        // (highlights only). Reading the bright side directly lets a small
+        // bright object on a dark wallpaper survive the coverage sanity,
+        // where the flipped normal reading would be rejected as >95% dark.
+        raw = buildCutoutMask(w, h, (x, y) => 1 - lum(x, y), 1 - threshold);
+        return raw;
     }
     if (mode === "luminance") {
         raw = buildCutoutMask(w, h, lum, threshold);
