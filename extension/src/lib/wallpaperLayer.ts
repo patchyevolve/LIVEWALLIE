@@ -117,7 +117,7 @@ export class WallpaperForeground {
             this._srcCache = { uri, pb: WallpaperForeground._loadPixbuf(uri) };
         }
         const pb = this._srcCache.pb;
-        const alpha: ForegroundMask =
+        const result =
             pb === null
                 ? null
                 : computeCoverMask(
@@ -127,7 +127,13 @@ export class WallpaperForeground {
                       threshold,
                       invert,
                       mode
-                  )?.alpha ?? null;
+                  );
+        const alpha: ForegroundMask = result?.alpha ?? null;
+        log(
+            `[live-wallpaper] layering mask ${this._width}x${this._height}: ${
+                result ? `coverage=${result.coverage.toFixed(2)}` : "null"
+            }`
+        );
         this._maskCache = {
             uri,
             w: this._width,

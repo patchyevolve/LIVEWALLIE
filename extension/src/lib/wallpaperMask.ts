@@ -264,6 +264,46 @@ export function applyMaskToPixbuf(
     );
 }
 
+/** Cover-fit crop of src to exactly w×h, matching how GNOME paints the
+ *  wallpaper (scale to cover, center-crop). The mask and the preview must
+ *  sample the same pixels, so the crop is NEAREST like the extension's
+ *  mask computation. */
+export function coverCropPixbuf(
+    src: GdkPixbuf.Pixbuf,
+    w: number,
+    h: number
+): GdkPixbuf.Pixbuf {
+    const iw = src.get_width();
+    const ih = src.get_height();
+    const scale = Math.max(w / iw, h / ih);
+    const dw = Math.max(1, Math.round(iw * scale));
+    const dh = Math.max(1, Math.round(ih * scale));
+    // Window of w×h centered on the dw×dh scaled image.
+    const ox = Math.round((dw - w) / 2);
+    const oy = Math.round((dh - h) / 2);
+
+    if (dw === iw && dh === ih && ox === 0 && oy === 0) return src;
+    const scaled = (dw === iw && dh === ih
+        ? src
+        : src.scale_simple(dw, dh, GdkPixbuf.InterpType.NEAREST))!;
+    const cx = Math.max(0, ox);
+    const cy = Math.max(0, oy);
+    const cw = Math.min(w, dw - cx);
+    const chh = Math.min(h, dh - cy);
+    // copy_area asserts src/dest alpha match — the wallpaper may be a
+    // PNG with alpha, so the crop must carry the same channel layout.
+    const crop = GdkPixbuf.Pixbuf.new(
+        GdkPixbuf.Colorspace.RGB,
+        scaled.get_has_alpha(),
+        8,
+        w,
+        h
+    );
+    crop.fill(0);
+    scaled.copy_area(cx, cy, cw, chh, crop, Math.max(0, -ox), Math.max(0, -oy));
+    return crop;
+}
+
 export type MaskMode = "auto" | "luminance" | "edges";
 
 /** Foreground mask for a display of w×h logical pixels, sampled from the
@@ -281,38 +321,7 @@ export function computeCoverMask(
     invert = false,
     mode: MaskMode = "auto"
 ): CutoutResult | null {
-    const iw = src.get_width();
-    const ih = src.get_height();
-    const scale = Math.max(w / iw, h / ih);
-    const dw = Math.max(1, Math.round(iw * scale));
-    const dh = Math.max(1, Math.round(ih * scale));
-    // Window of w×h centered on the dw×dh scaled image.
-    const ox = Math.round((dw - w) / 2);
-    const oy = Math.round((dh - h) / 2);
-
-    let crop: GdkPixbuf.Pixbuf;
-    if (dw === iw && dh === ih && ox === 0 && oy === 0) {
-        crop = src;
-    } else {
-        const scaled = (dw === iw && dh === ih
-            ? src
-            : src.scale_simple(dw, dh, GdkPixbuf.InterpType.NEAREST))!;
-        const cx = Math.max(0, ox);
-        const cy = Math.max(0, oy);
-        const cw = Math.min(w, dw - cx);
-        const chh = Math.min(h, dh - cy);
-        // copy_area asserts src/dest alpha match — the wallpaper may be a
-        // PNG with alpha, so the crop must carry the same channel layout.
-        crop = GdkPixbuf.Pixbuf.new(
-            GdkPixbuf.Colorspace.RGB,
-            scaled.get_has_alpha(),
-            8,
-            w,
-            h
-        );
-        crop.fill(0);
-        scaled.copy_area(cx, cy, cw, chh, crop, Math.max(0, -ox), Math.max(0, -oy));
-    }
+    const crop = coverCropPixbuf(src, w, h);
 
     const stride = crop.get_rowstride();
     const n = crop.get_n_channels();

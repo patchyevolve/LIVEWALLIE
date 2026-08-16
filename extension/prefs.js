@@ -14,9 +14,8 @@ import GdkPixbuf from "gi://GdkPixbuf?version=2.0";
 import { extractAccent } from "./lib/paletteManager.js";
 import {
     applyMaskToPixbuf,
-    buildCutoutMask,
-    buildEdgeMask,
-    invertCutout,
+    computeCoverMask,
+    coverCropPixbuf,
 } from "./lib/wallpaperMask.js";
 
 const SCHEMA_ID = "org.gnome.shell.extensions.live-wallpaper@codeworks2";
@@ -585,7 +584,7 @@ export default class LiveWallpaperPrefs {
         preview.add(previewLabel);
         page.add(preview);
 
-        let previewCache = null; // {pb: Pixbuf, w, h, uri}
+        let previewCache = null; // {pb, uri}
         const bgSettings = Gio.Settings.new("org.gnome.desktop.background");
         const loadPreview = () => {
             const uri = bgSettings.get_string("picture-uri");
@@ -595,70 +594,93 @@ export default class LiveWallpaperPrefs {
             if (path.startsWith("file://")) path = decodeURIComponent(path.slice(7));
             if (!GLib.file_test(path, GLib.FileTest.EXISTS)) return null;
             try {
-                const pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 640, 640, true);
-                previewCache = { pb, w: pb.get_width(), h: pb.get_height(), uri };
+                const pb = GdkPixbuf.Pixbuf.new_from_file(path);
+                previewCache = { pb, uri };
                 return previewCache;
             } catch (e) {
                 return null;
             }
         };
+        // The extension writes the monitor list to the runtime dir on every
+        // rebuild — the preview must evaluate the mask at the REAL screen
+        // geometry, not an arbitrary preview scale (edge detection is
+        // scale-sensitive and a wrong scale produces a mask the screen
+        // would reject).
+        const screenGeometry = () => {
+            const dir = `${GLib.getenv("XDG_RUNTIME_DIR") ?? "/tmp"}/live-wallpaper`;
+            const file = `${dir}/monitors.json`;
+            if (!GLib.file_test(file, GLib.FileTest.EXISTS)) return null;
+            try {
+                const contents = GLib.file_get_contents(file)[1];
+                const text =
+                    contents instanceof Uint8Array
+                        ? new TextDecoder().decode(contents)
+                        : String(contents);
+                const list = JSON.parse(text);
+                const m = list[0];
+                return m && m.width > 0 && m.height > 0
+                    ? { w: m.width, h: m.height }
+                    : null;
+            } catch (e) {
+                return null;
+            }
+        };
+        let previewTimer = 0;
         const renderPreview = () => {
+            if (previewTimer) GLib.source_remove(previewTimer);
+            previewTimer = GLib.timeout_add(
+                GLib.PRIORITY_DEFAULT,
+                120,
+                () => {
+                    previewTimer = 0;
+                    renderPreviewNow();
+                    return GLib.SOURCE_REMOVE;
+                }
+            );
+        };
+        const renderPreviewNow = () => {
             const cached = loadPreview();
             if (!cached) {
                 picture.paintable = null;
                 previewLabel.label = "Could not read the wallpaper image";
                 return;
             }
-            const { pb, w, h } = cached;
-            const stride = pb.get_rowstride();
-            const n = pb.get_n_channels();
-            const px = pb.get_pixels();
+            const { pb } = cached;
             const threshold = settings.get_double("layering-threshold");
             const invert = settings.get_boolean("layering-invert");
             const mode = settings.get_string("layering-mode");
-            const lum = (x, y) => {
-                const i = y * stride + x * n;
-                return (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / 255;
-            };
-            let mask = null;
-            let used = "luminance";
-            if (mode === "edges") {
-                mask = buildEdgeMask(w, h, lum);
-                used = "edges";
-            } else if (mode === "luminance") {
-                mask = buildCutoutMask(w, h, lum, threshold);
-            } else {
-                mask = buildCutoutMask(w, h, lum, threshold);
-                if (mask === null) {
-                    mask = buildEdgeMask(w, h, lum);
-                    used = "edges";
-                }
-            }
-            if (mask && invert) mask = invertCutout(mask);
+            const geo = screenGeometry();
+            const mw = geo ? geo.w : pb.get_width();
+            const mh = geo ? geo.h : pb.get_height();
+            // Same computation the shell runs, at the same geometry and
+            // from the same full-resolution pixels — the preview now shows
+            // exactly what the screen will do (including "effect off").
+            const mask = computeCoverMask(pb, mw, mh, threshold, invert, mode);
             const pct = mask ? Math.round(mask.coverage * 100) : null;
             if (mask === null) {
                 picture.paintable = null;
                 previewLabel.label =
-                    `No clean split at this cutoff (foreground ${pct ?? "—"}%) — effect off. ` +
+                    `No clean split on the ${mw}×${mh} screen (foreground ${pct ?? "—"}%) — effect off there. ` +
                     (edgeSwitch.active
                         ? "Try the brightness reading (turn Edge detection off), or drag the cutoff."
                         : "Enable Edge detection, or drag the cutoff toward the other end.");
                 return;
             }
-            let out = applyMaskToPixbuf(pb, mask.alpha);
+            const crop = coverCropPixbuf(pb, mw, mh);
+            const out = applyMaskToPixbuf(crop, mask.alpha);
             picture.paintable = Gdk.Texture.new_for_pixbuf(out);
             previewLabel.label =
-                `${invert ? "Inverted — bright" : "Dark"} foreground covers ${pct}% of the image ` +
-                `(${used === "edges" ? "edges detection" : "brightness split"}) — ` +
+                `${invert ? "Inverted — bright" : "Dark"} foreground covers ${pct}% of the ${mw}×${mh} screen ` +
+                `(${mode === "edges" ? "edges detection" : "brightness split"}) — ` +
                 "particles fade out there; the rest stays transparent.";
         };
-        renderPreview();
+        renderPreviewNow();
         settings.connect("changed::layering-threshold", renderPreview);
         settings.connect("changed::layering-invert", renderPreview);
         settings.connect("changed::layering-mode", renderPreview);
         bgSettings.connect("changed::picture-uri", () => {
             previewCache = null;
-            renderPreview();
+            renderPreviewNow();
         });
 
         // ---- Screens ---------------------------------------------------
