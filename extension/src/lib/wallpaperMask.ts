@@ -6,9 +6,14 @@
 import GdkPixbuf from "gi://GdkPixbuf";
 import GLib from "gi://GLib";
 
-const MIN_COVERAGE = 0.05;
+const MIN_COVERAGE = 0.0005;
 const MAX_COVERAGE = 0.95;
-const FADE_MARGIN = 0.04;
+// Different margins per side: the low side must be tight so a small but
+// genuine foreground (an icon, a boat on a lake) gets the full effect,
+// while the high side stays wide so a mask covering almost everything
+// fades out gracefully instead of popping.
+const LOW_FADE_MARGIN = 0.002;
+const HIGH_FADE_MARGIN = 0.02;
 
 export interface CutoutResult {
     /** 0..1 per-pixel foreground opacity, row-major, width*height entries. */
@@ -50,8 +55,8 @@ export function buildCutoutMask(
 function finishCutout(alpha: number[], covered: number): CutoutResult | null {
     const coverage = covered / alpha.length;
     const fade =
-        clamp((coverage - MIN_COVERAGE) / FADE_MARGIN, 0, 1) *
-        clamp((MAX_COVERAGE - coverage) / FADE_MARGIN, 0, 1);
+        clamp((coverage - MIN_COVERAGE) / LOW_FADE_MARGIN, 0, 1) *
+        clamp((MAX_COVERAGE - coverage) / HIGH_FADE_MARGIN, 0, 1);
     if (fade <= 0.02) return null;
     if (fade < 1) {
         for (let i = 0; i < alpha.length; i++) alpha[i] *= fade;
@@ -133,30 +138,33 @@ export function buildEdgeMask(
     }
     const barrierThr = Math.max(otsu, 6) / 255;
     const barrier = new Uint8Array(w * h);
-    const dilated = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) {
         for (let x = 0; x < w; x++) {
             if (grad[y * w + x] > barrierThr) barrier[y * w + x] = 1;
         }
     }
+    // Dilate the barrier with horizontal then vertical span sweeps (radius
+    // 3). A single 1px dilation left gaps in edge rings once the wallpaper
+    // is downscaled to screen size — the flood fill leaked through them and
+    // the foreground collapsed to a few percent. Span sweeps are O(w·h)
+    // and cheap on the sparse barrier.
+    const DILATE = 3;
+    const dilated = new Uint8Array(w * h);
     for (let y = 0; y < h; y++) {
-        const y0 = Math.max(0, y - 1);
-        const y1 = Math.min(h - 1, y + 1);
+        const row = y * w;
         for (let x = 0; x < w; x++) {
-            if (barrier[y * w + x]) {
-                dilated[y * w + x] = 1;
-                continue;
-            }
-            const x0 = Math.max(0, x - 1);
-            const x1 = Math.min(w - 1, x + 1);
-            if (
-                barrier[y0 * w + x0] || barrier[y0 * w + x] ||
-                barrier[y0 * w + x1] || barrier[y * w + x0] ||
-                barrier[y * w + x1] || barrier[y1 * w + x0] ||
-                barrier[y1 * w + x] || barrier[y1 * w + x1]
-            ) {
-                dilated[y * w + x] = 1;
-            }
+            if (!barrier[row + x]) continue;
+            const x0 = Math.max(0, x - DILATE);
+            const x1 = Math.min(w - 1, x + DILATE);
+            for (let k = x0; k <= x1; k++) dilated[row + k] = 1;
+        }
+    }
+    for (let x = 0; x < w; x++) {
+        for (let y = 0; y < h; y++) {
+            if (!dilated[y * w + x]) continue;
+            const y0 = Math.max(0, y - DILATE);
+            const y1 = Math.min(h - 1, y + DILATE);
+            for (let k = y0; k <= y1; k++) dilated[k * w + x] = 1;
         }
     }
     const reach = new Uint8Array(w * h);
@@ -208,16 +216,16 @@ export function buildEdgeMask(
 
 /** Inverted cutout: bright areas become the foreground (particles hide
  *  behind bright objects — works on dark/black wallpapers where the
- *  normal dark-foreground reading covers the whole screen). Coverage
- *  sanity runs on the INVERTED result with a relaxed low bound so dark
- *  wallpapers with a small bright region still produce a mask. */
+ *  normal dark-foreground reading covers the whole screen). The low
+ *  coverage bound is shared with the normal reading, so a small bright
+ *  object on black still produces a mask. */
 export function invertCutout(result: CutoutResult): CutoutResult | null {
     const alpha = new Array<number>(result.alpha.length);
     for (let i = 0; i < alpha.length; i++) alpha[i] = 1 - result.alpha[i];
     const coverage = 1 - result.coverage;
     const fade =
-        clamp((coverage - 0.02) / FADE_MARGIN, 0, 1) *
-        clamp((MAX_COVERAGE - coverage) / FADE_MARGIN, 0, 1);
+        clamp((coverage - MIN_COVERAGE) / LOW_FADE_MARGIN, 0, 1) *
+        clamp((MAX_COVERAGE - coverage) / HIGH_FADE_MARGIN, 0, 1);
     if (fade <= 0.02) return null;
     if (fade < 1) {
         for (let i = 0; i < alpha.length; i++) alpha[i] *= fade;
@@ -331,6 +339,18 @@ export function computeCoverMask(
         return (px[i] * 0.3 + px[i + 1] * 0.59 + px[i + 2] * 0.11) / 255;
     };
     let raw: CutoutResult | null;
+    if (invert && mode !== "edges") {
+        // Inverted luminance reading: count the BRIGHT pixels as foreground
+        // and apply the coverage sanity to that fraction. This must run
+        // directly — computing the normal reading first is useless on a
+        // dark wallpaper, where it is rejected (>95% dark) and the inverted
+        // reading (a small bright object) never gets a chance.
+        raw = buildCutoutMask(w, h, (x, y) => 1 - lum(x, y), threshold);
+        if (!raw) return null;
+        const alpha = new Array<number>(raw.alpha.length);
+        for (let i = 0; i < alpha.length; i++) alpha[i] = 1 - raw.alpha[i];
+        return { alpha, coverage: raw.coverage };
+    }
     if (mode === "luminance") {
         raw = buildCutoutMask(w, h, lum, threshold);
     } else if (mode === "edges") {
