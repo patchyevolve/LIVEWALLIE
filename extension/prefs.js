@@ -259,8 +259,15 @@ export default class LiveWallpaperPrefs {
                 SCENE_KEYS.indexOf(settings.get_string("scene-preset"))
             ),
         });
+        // The row re-emits notify::selected when it is realized (after the
+        // handler is connected), which would re-apply the stored preset over
+        // the user's manual tweaks on every panel open. Only apply when the
+        // selection actually differs from the already-stored preset.
+        let lastApplied = settings.get_string("scene-preset");
         sceneRow.connect("notify::selected", () => {
             const preset = SCENE_KEYS[sceneRow.selected];
+            if (preset === lastApplied) return;
+            lastApplied = preset;
             const bundle = SCENES[preset];
             const missing = PRESET_KEYS.filter(
                 (k) => !bundle.some(([key]) => key === k)
