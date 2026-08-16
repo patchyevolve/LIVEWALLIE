@@ -14,9 +14,11 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 UUID="live-wallpaper@codeworks2"
 EXTDIR="${XDG_DATA_HOME:-$HOME/.local/share}/gnome-shell/extensions/$UUID"
 
-# Prebuilt artifacts (release tarball layout).
-HAS_EXT_BUILT=$([ -f "$ROOT/extension/dist/extension.js" ] && echo 1 || echo 0)
-HAS_SAMPLER=$([ -f "$ROOT/sampler/live-wallpaper-sampler" ] && echo 1 || echo 0)
+# Prebuilt artifacts (release tarball layout) vs source checkout.
+EXT_BUILT=$([ -f "$ROOT/extension/dist/extension.js" ] && echo 1 || echo 0)
+SAMPLER_REL=$([ -f "$ROOT/sampler/live-wallpaper-sampler" ] && echo 1 || echo 0)
+SAMPLER_SRC=$([ -f "$ROOT/sampler/target/release/live-wallpaper-sampler" ] && echo 1 || echo 0)
+SRC_TREE=$([ -d "$ROOT/extension/src" ] && echo 1 || echo 0)
 
 if [ "${1:-}" = "uninstall" ]; then
     echo "==> Disabling and removing $UUID"
@@ -26,19 +28,22 @@ if [ "${1:-}" = "uninstall" ]; then
     exit 0
 fi
 
-if [ "$HAS_EXT_BUILT" = 0 ] || [ "$HAS_SAMPLER" = 0 ]; then
-    if [ "$HAS_EXT_BUILT" = 0 ] && [ -d "$ROOT/extension/src" ]; then
-        echo "==> Source checkout detected — building from source"
-        bash "$ROOT/scripts/build.sh"
+if [ "$EXT_BUILT" = 1 ] && { [ "$SAMPLER_REL" = 1 ] || [ "$SAMPLER_SRC" = 1 ]; }; then
+    echo "==> Using prebuilt artifacts"
+    if [ "$SAMPLER_REL" = 1 ]; then
+        SAMPLER_BIN="$ROOT/sampler/live-wallpaper-sampler"
     else
-        echo "ERROR: no prebuilt artifacts and no source tree found."
-        echo "  From a git checkout run: bash scripts/install.sh"
-        echo "  From a release tarball the prebuilt files must be present."
-        exit 1
+        SAMPLER_BIN="$ROOT/sampler/target/release/live-wallpaper-sampler"
     fi
+elif [ "$SRC_TREE" = 1 ]; then
+    echo "==> Source checkout detected — building from source"
+    bash "$ROOT/scripts/build.sh"
     SAMPLER_BIN="$ROOT/sampler/target/release/live-wallpaper-sampler"
 else
-    SAMPLER_BIN="$ROOT/sampler/live-wallpaper-sampler"
+    echo "ERROR: no prebuilt artifacts and no source tree found."
+    echo "  From a git checkout run: bash scripts/install.sh"
+    echo "  From a release tarball the prebuilt files must be present."
+    exit 1
 fi
 
 echo "==> Installing to $EXTDIR"
